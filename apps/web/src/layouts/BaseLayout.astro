@@ -1,0 +1,278 @@
+---
+import Header from "@/components/layout/Header.astro";
+import Footer from "@/components/layout/Footer.astro";
+import CookieConsent from "@/components/ui/CookieConsent";
+import "@/styles/global.css";
+import { SITE_URL, POCKETBASE_URL } from "@/lib/constants/config";
+
+const {
+  title = "PocketBase.cn",
+  description = "PocketBase 中文文档、插件市场、案例展示与下载镜像",
+  noindex = false,
+  schemaType = "WebPage",
+  schemaData = {}
+} = Astro.props;
+
+const currentPath = Astro.url.pathname.replace(/\/+$/g, "") || "/";
+const canonical = new URL(currentPath === "/" ? "/" : `${currentPath}/`, SITE_URL).toString();
+const ogImage = new URL("/og-image.png", SITE_URL).toString();
+const gaId = import.meta.env.PUBLIC_GA_ID || "";
+const umamiSrc = import.meta.env.PUBLIC_UMAMI_SRC || "";
+const umamiWebsiteId = import.meta.env.PUBLIC_UMAMI_WEBSITE_ID || "";
+
+// Detect page type and generate schema
+function detectPageType(pathname: string): string {
+  if (pathname === "/") return "homepage";
+  if (pathname.startsWith("/docs")) return "docs";
+  if (pathname.startsWith("/plugins/") && pathname.length > 9) return "plugin";
+  if (pathname.startsWith("/plugins")) return "plugins-list";
+  if (pathname.startsWith("/showcase/") && pathname.length > 11) return "showcase-item";
+  if (pathname.startsWith("/showcase")) return "showcase-list";
+  if (pathname.startsWith("/downloads")) return "downloads";
+  return "default";
+}
+
+// Generate breadcrumb list schema
+function generateBreadcrumbList(pathname: string, siteUrl: string) {
+  const segments = pathname.split("/").filter(Boolean);
+  const breadcrumbs = [{ name: "Home", item: siteUrl }];
+
+  let buildPath = "";
+  for (const segment of segments) {
+    buildPath += `/${segment}`;
+    const name = segment
+      .split("-")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+    breadcrumbs.push({
+      name,
+      item: `${siteUrl}${buildPath}/`
+    });
+  }
+
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: breadcrumbs.map((crumb, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name: crumb.name,
+      item: crumb.item
+    }))
+  };
+}
+
+// Generate dynamic schema based on page type
+function generateSchema(pageType: string, additionalData: Record<string, any> = {}) {
+  const baseSchema = {
+    "@context": "https://schema.org",
+    "@type": schemaType,
+    url: canonical
+  };
+
+  const breadcrumbSchema = generateBreadcrumbList(currentPath, SITE_URL);
+
+  switch (pageType) {
+    case "docs":
+      return {
+        ...baseSchema,
+        "@type": "TechArticle",
+        headline: title,
+        description: description,
+        author: {
+          "@type": "Organization",
+          name: "PocketBase.cn"
+        },
+        datePublished: additionalData.datePublished || new Date().toISOString(),
+        dateModified: additionalData.dateModified || new Date().toISOString(),
+        inLanguage: "zh-CN",
+        about: {
+          "@type": "SoftwareApplication",
+          name: "PocketBase"
+        }
+      };
+
+    case "plugin":
+      return {
+        ...baseSchema,
+        "@type": "SoftwareSourceCode",
+        name: additionalData.name || title,
+        description: description,
+        author: {
+          "@type": additionalData.authorType || "Organization",
+          name: additionalData.authorName || "PocketBase Community"
+        },
+        programmingLanguage: additionalData.language || "JavaScript",
+        runtimePlatform: "PocketBase",
+        codeRepository: additionalData.repository,
+        offers: {
+          "@type": "Offer",
+          price: "0",
+          priceCurrency: "USD"
+        },
+        ...(additionalData.aggregateRating ? {
+          aggregateRating: {
+            "@type": "AggregateRating",
+            ratingValue: additionalData.aggregateRating.value,
+            ratingCount: additionalData.aggregateRating.count,
+            bestRating: 5,
+            worstRating: 1
+          }
+        } : {})
+      };
+
+    case "showcase-item":
+      return {
+        ...baseSchema,
+        "@type": "CreativeWork",
+        name: additionalData.name || title,
+        description: description,
+        author: {
+          "@type": "Person",
+          name: additionalData.authorName || "PocketBase Community"
+        },
+        url: additionalData.url,
+        keywords: additionalData.tags?.join(", ") || "",
+        genre: additionalData.category || "Web Application"
+      };
+
+    case "downloads":
+      return {
+        ...baseSchema,
+        "@type": "SoftwareApplication",
+        name: "PocketBase",
+        operatingSystem: "Windows, macOS, Linux, ARM",
+        applicationCategory: "DeveloperApplication",
+        offers: {
+          "@type": "Offer",
+          price: "0",
+          priceCurrency: "USD"
+        },
+        author: {
+          "@type": "Organization",
+          name: "PocketBase"
+        },
+        description: description,
+        downloadUrl: additionalData.downloadUrl
+      };
+
+    default:
+      return {
+        ...baseSchema,
+        "@type": "WebPage",
+        name: title,
+        description: description,
+        inLanguage: "zh-CN"
+      };
+  }
+}
+
+const pageType = detectPageType(currentPath);
+const mainSchema = generateSchema(pageType, schemaData);
+const breadcrumbSchema = generateBreadcrumbList(currentPath, SITE_URL);
+
+// Combine schemas
+const finalSchemas = [mainSchema, breadcrumbSchema];
+---
+
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <!-- Theme initialization to prevent FOUC -->
+    <script is:inline>
+      (function() {
+        const stored = localStorage.getItem('theme');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const isDark = stored === 'dark' || (!stored && prefersDark);
+        if (isDark) {
+          document.documentElement.classList.add('dark');
+          document.documentElement.setAttribute('data-theme', 'dark');
+        } else {
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      })();
+    </script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <meta name="robots" content={noindex ? "noindex, nofollow" : "index, follow, max-image-preview:large"} />
+    <meta name="author" content="PocketBase.cn" />
+    <meta name="baidu-site-verification" content="codeva-xxx" />
+    <meta name="theme-color" content="#3366ff" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="PocketBase.cn" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="PocketBase.cn" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+
+    <!-- Preconnect to API origin for faster resource loading -->
+    <link rel="preconnect" href={new URL(POCKETBASE_URL).origin} />
+    <link rel="dns-prefetch" href={new URL(POCKETBASE_URL).origin} />
+
+    <!-- Register Service Worker -->
+    <script is:inline>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {
+            // Silent fail - service worker is optional
+          });
+        });
+      }
+    </script>
+
+    <!-- Dynamic Schema Markup -->
+    {finalSchemas.map((schema) => (
+      <script type="application/ld+json" is:inline set:html={JSON.stringify(schema)} />
+    ))}
+
+    {gaId ? (
+      <Fragment>
+        <script async src={`https://www.googletagmanager.com/gtag/js?id=${gaId}`}></script>
+        <script is:inline>
+          {`window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config', '${gaId}', { anonymize_ip: true });`}
+        </script>
+      </Fragment>
+    ) : null}
+
+    {umamiSrc && umamiWebsiteId ? (
+      <script
+        async
+        src={umamiSrc}
+        data-website-id={umamiWebsiteId}
+      ></script>
+    ) : null}
+  </head>
+  <body class="min-h-screen">
+    <a
+      href="#main-content"
+      class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-brand-600 focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white"
+    >
+      跳转到主要内容
+    </a>
+    <Header currentPath={currentPath} />
+    <main id="main-content" class="mx-auto max-w-6xl px-4 py-10" tabindex="-1">
+      <slot />
+    </main>
+    <Footer />
+    <CookieConsent client:load />
+  </body>
+</html>

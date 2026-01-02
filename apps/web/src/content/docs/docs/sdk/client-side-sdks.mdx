@@ -1,0 +1,17 @@
+---
+title: Client SDKs
+description: Web/Dart/Go 等客户端 SDK 的使用方式与常见封装建议。
+---
+
+## Web SDK
+
+推荐用 `pocketbase` JS SDK：
+
+```ts
+import PocketBase from "pocketbase";
+const pb = new PocketBase("http://127.0.0.1:8090");
+```
+
+## Dart / Go
+
+移动端可用 Dart SDK；服务端集成通常使用 Go/HTTP 调用。

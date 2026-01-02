@@ -1,0 +1,619 @@
+---
+title: 文件处理
+description: 文件上传、访问控制、缩略图生成、对象存储集成与生产环境最佳实践
+---
+
+PocketBase 提供了完整的文件管理功能，支持本地存储和对象存储（S3兼容）。
+
+## 文件字段配置
+
+### 基础配置
+
+```javascript
+{
+  "name": "avatar",
+  "type": "file",
+  "options": {
+    "maxSelect": 1,           // 最多选择 1 个文件
+    "maxSize": 5242880,       // 单文件最大 5MB
+    "mimeTypes": [            // 限制文件类型
+      "image/jpeg",
+      "image/png",
+      "image/webp"
+    ],
+    "thumbs": ["200x200"],    // 生成缩略图
+    "protected": false        // 公开访问
+  }
+}
+```
+
+### 配置选项详解
+
+| 选项        | 类型     | 说明                          |
+| ----------- | -------- | ----------------------------- |
+| `maxSelect` | number   | 最大文件数量，null 表示无限制 |
+| `maxSize`   | number   | 单文件最大字节数              |
+| `mimeTypes` | string[] | 允许的 MIME 类型，\* 表示全部 |
+| `thumbs`    | string[] | 缩略图尺寸列表                |
+| `protected` | bool     | 是否需要鉴权才能访问          |
+
+### 多文件上传
+
+```javascript
+{
+  "name": "gallery",
+  "type": "file",
+  "options": {
+    "maxSelect": 10,
+    "maxSize": 10485760,
+    "mimeTypes": ["image/*", "video/mp4"],
+    "thumbs": ["200x200", "800x600"]
+  }
+}
+```
+
+### 受保护的文件
+
+```javascript
+{
+  "name": "document",
+  "type": "file",
+  "options": {
+    "maxSelect": 1,
+    "protected": true  // 需要登录才能访问
+  }
+}
+```
+
+## 文件上传
+
+### 客户端上传（JavaScript SDK）
+
+```javascript
+import PocketBase from "pocketbase";
+const pb = new PocketBase("http://127.0.0.1:8090");
+
+// 单文件上传
+const formData = new FormData();
+formData.append("title", "My Post");
+formData.append("file", fileInput.files[0]);
+
+const record = await pb.collection("posts").create(formData);
+```
+
+### 多文件上传
+
+```javascript
+const formData = new FormData();
+formData.append("title", "Gallery");
+
+// 多个文件使用相同的字段名
+for (const file of fileInput.files) {
+  formData.append("gallery", file);
+}
+
+const record = await pb.collection("posts").create(formData);
+```
+
+### 带进度的上传
+
+```javascript
+function uploadWithProgress(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const xhr = new XMLHttpRequest();
+
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable) {
+        const percent = Math.round((e.loaded / e.total) * 100);
+        onProgress(percent);
+      }
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status === 200) {
+        resolve(JSON.parse(xhr.responseText));
+      } else {
+        reject(new Error(xhr.statusText));
+      }
+    });
+
+    xhr.open("POST", `${pb.baseUrl}/api/collections/uploads/records`);
+    xhr.setRequestHeader("Authorization", `Bearer ${pb.authStore.token}`);
+    xhr.send(formData);
+  });
+}
+```
+
+### Vue 3 上传组件
+
+```vue
+<script setup>
+import { ref } from "vue";
+import { pb } from "@/lib/pocketbase";
+
+const uploading = ref(false);
+const progress = ref(0);
+const preview = ref(null);
+
+async function uploadFile(file) {
+  uploading.value = true;
+  progress.value = 0;
+
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("title", "Uploaded file");
+
+    const xhr = new XMLHttpRequest();
+
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable) {
+        progress.value = Math.round((e.loaded / e.total) * 100);
+      }
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status === 200) {
+        resolve(JSON.parse(xhr.responseText));
+      } else {
+        reject(new Error(xhr.statusText));
+      }
+      uploading.value = false;
+    });
+
+    xhr.open("POST", `${pb.baseUrl}/api/collections/uploads/records`);
+    xhr.setRequestHeader("Authorization", `Bearer ${pb.authStore.token}`);
+    xhr.send(formData);
+  });
+}
+
+function handleFileSelect(e) {
+  const file = e.target.files[0];
+  if (file) {
+    preview.value = URL.createObjectURL(file);
+  }
+}
+</script>
+
+<template>
+  <div>
+    <input type="file" @change="handleFileSelect" :disabled="uploading" />
+    <img v-if="preview" :src="preview" class="preview" />
+    <p v-if="uploading">上传中: {{ progress }}%</p>
+  </div>
+</template>
+```
+
+### React 上传组件
+
+```jsx
+import { useState, useRef } from "react";
+import pb from "@/lib/pocketbase";
+
+export function FileUpload() {
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const fileInput = useRef(null);
+
+  async function uploadFile(file) {
+    setUploading(true);
+    setProgress(0);
+
+    return new Promise((resolve, reject) => {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const xhr = new XMLHttpRequest();
+
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable) {
+          setProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      });
+
+      xhr.addEventListener("load", () => {
+        if (xhr.status === 200) {
+          resolve(JSON.parse(xhr.responseText));
+        } else {
+          reject(new Error(xhr.statusText));
+        }
+        setUploading(false);
+      });
+
+      xhr.open("POST", `${pb.baseUrl}/api/collections/uploads/records`);
+      xhr.setRequestHeader("Authorization", `Bearer ${pb.authStore.token}`);
+      xhr.send(formData);
+    });
+  }
+
+  return (
+    <div>
+      <input ref={fileInput} type="file" disabled={uploading} />
+      <p>{uploading ? `上传中: ${progress}%` : "选择文件"}</p>
+    </div>
+  );
+}
+```
+
+## 文件访问
+
+### 获取文件 URL
+
+```javascript
+// 获取原始文件 URL
+const url = pb.files.getUrl(record, record.avatar);
+
+// 获取缩略图 URL
+const thumbUrl = pb.files.getUrl(record, record.avatar, {
+  thumb: "200x200",
+});
+
+// 完整示例
+const post = await pb.collection("posts").getOne("record_id");
+const imageUrl = pb.files.getUrl(post, post.cover);
+const thumbnailUrl = pb.files.getUrl(post, post.cover, {
+  thumb: "200x200",
+});
+```
+
+### 受保护文件的访问
+
+受保护的文件需要通过 API 访问：
+
+```javascript
+// 使用 SDK 自动处理鉴权
+const url = pb.files.getUrl(record, record.document);
+
+// 手动添加 Token
+const url = `${pb.baseUrl}/api/files/${record.collectionId}/${record.id}/${record.document}?token=${pb.authStore.token}`;
+```
+
+### 在前端显示图片
+
+```javascript
+// Vue
+<img :src="pb.files.getUrl(post, post.cover)" />
+
+// React
+<img src={pb.files.getUrl(post, post.cover)} />
+
+// 缩略图
+<img :src="pb.files.getUrl(post, post.cover, { thumb: '200x200' })" />
+```
+
+## 对象存储集成
+
+### S3 兼容存储
+
+配置 S3 或兼容服务（如 MinIO、阿里云 OSS）：
+
+```javascript
+// pocketbase.config.go 或使用环境变量
+package main
+
+import (
+  "github.com/pocketbase/pocketbase"
+  "github.com/pocketbase/pocketbase/plugins/s3storage"
+)
+
+func main() {
+  app := pocketbase.New()
+
+  s3storage.Register(app, s3storage.Config{
+    AuthToken:   "your_s3_access_key",
+    AuthSecret:  "your_s3_secret_key",
+    Bucket:      "my-bucket",
+    Region:      "us-east-1",
+    Endpoint:    "https://s3.amazonaws.com",
+    ForcePathStyle: false,
+  })
+
+  app.Start()
+}
+```
+
+### 阿里云 OSS
+
+```javascript
+s3storage.Register(app, s3storage.Config{
+  AuthToken:  "OSS_ACCESS_KEY_ID",
+  AuthSecret: "OSS_ACCESS_KEY_SECRET",
+  Bucket:     "my-bucket",
+  Region:     "oss-cn-hangzhou",
+  Endpoint:   "https://oss-cn-hangzhou.aliyuncs.com",
+  ForcePathStyle: true,
+});
+```
+
+### 腾讯云 COS
+
+```javascript
+s3storage.Register(app, s3storage.Config{
+  AuthToken:  "SECRET_ID",
+  AuthSecret: "SECRET_KEY",
+  Bucket:     "my-bucket-1234567890",
+  Region:     "ap-guangzhou",
+  Endpoint:   "https://cos.ap-guangzhou.myqcloud.com",
+  ForcePathStyle: false,
+});
+```
+
+### 环境变量配置
+
+```bash
+# .env
+S3_ACCESS_KEY=your_access_key
+S3_SECRET_KEY=your_secret_key
+S3_BUCKET=my-bucket
+S3_REGION=us-east-1
+S3_ENDPOINT=https://s3.amazonaws.com
+```
+
+## 缩略图
+
+### 配置缩略图
+
+```javascript
+{
+  "name": "image",
+  "type": "file",
+  "options": {
+    "thumbs": ["200x200", "400x400", "800x800"]
+  }
+}
+```
+
+### 访问缩略图
+
+```javascript
+// 获取指定尺寸缩略图
+const thumb200 = pb.files.getUrl(record, record.image, {
+  thumb: "200x200",
+});
+const thumb400 = pb.files.getUrl(record, record.image, {
+  thumb: "400x400",
+});
+```
+
+### 缩略图命名规则
+
+```
+原始文件:           abc123.jpg
+200x200 缩略图:     thumb_200x200_abc123.jpg
+400x400 缩略图:     thumb_400x400_abc123.jpg
+```
+
+## 文件验证
+
+### 客户端验证
+
+```javascript
+function validateFile(file) {
+  const maxSize = 5 * 1024 * 1024; // 5MB
+  const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+
+  if (file.size > maxSize) {
+    throw new Error("文件大小不能超过 5MB");
+  }
+
+  if (!allowedTypes.includes(file.type)) {
+    throw new Error("只支持 JPG、PNG、WebP 格式");
+  }
+
+  return true;
+}
+
+// 使用
+fileInput.addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  try {
+    validateFile(file);
+  } catch (err) {
+    alert(err.message);
+  }
+});
+```
+
+### 服务端验证（Hooks）
+
+```javascript
+onRecordBeforeCreateRequest((e) => {
+  const collection = e.record.collection();
+
+  // 检查上传的文件
+  collection.schema.forEach((field) => {
+    if (field.type === "file") {
+      const files = e.record.data[field.name];
+      // 自定义验证逻辑
+    }
+  });
+});
+```
+
+## 文件删除
+
+### 自动删除
+
+使用 `cascadeDelete` 配置：
+
+```javascript
+{
+  "name": "attachments",
+  "type": "file",
+  "options": {
+    "cascadeDelete": true  // 删除记录时同时删除文件
+  }
+}
+```
+
+### 手动删除
+
+```javascript
+// 删除记录会自动删除关联文件（如果配置了 cascadeDelete）
+await pb.collection("posts").delete("record_id");
+
+// 或通过 API 直接删除文件
+await pb.send(`/api/files/posts/record_id/filename.jpg`, {
+  method: "DELETE",
+});
+```
+
+## 生产环境最佳实践
+
+### 1. 使用对象存储
+
+生产环境推荐使用对象存储：
+
+- 可靠性高，有冗余备份
+- CDN 加速
+- 无限扩展性
+- 成本相对较低
+
+### 2. 文件大小限制
+
+```javascript
+{
+  "name": "avatar",
+  "type": "file",
+  "options": {
+    "maxSize": 2097152  // 2MB
+  }
+}
+```
+
+### 3. 文件类型白名单
+
+```javascript
+{
+  "name": "document",
+  "type": "file",
+  "options": {
+    "mimeTypes": [
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ]
+  }
+}
+```
+
+### 4. CDN 配置
+
+将公开文件配置 CDN 加速：
+
+```nginx
+location /api/files/ {
+    proxy_pass http://127.0.0.1:8090;
+    proxy_cache cdn_cache;
+    proxy_cache_valid 200 7d;
+    proxy_cache_key "$request_uri";
+}
+```
+
+### 5. 安全配置
+
+```javascript
+// 敏感文件使用 protected
+{
+  "name": "idCard",
+  "type": "file",
+  "options": {
+    "protected": true  // 需要登录才能访问
+  }
+}
+
+// 结合 API 规则
+{
+  "view": "@request.auth.id != '' && id = @request.auth.id"
+}
+```
+
+## 常见问题
+
+### Q: 如何上传到不同目录？
+
+使用对象存储的路径前缀：
+
+```javascript
+s3storage.Register(app, s3storage.Config{
+  // ...
+  Bucket: "my-bucket",
+  // 文件会存储在 uploads/ 前缀下
+});
+```
+
+### Q: 如何实现图片压缩？
+
+在上传前使用客户端压缩：
+
+```javascript
+import Compressor from "compressorjs";
+
+new Compressor(file, {
+  quality: 0.8,
+  maxWidth: 1920,
+  maxHeight: 1080,
+  success(result) {
+    // result 是压缩后的 Blob
+    uploadFile(result);
+  },
+});
+```
+
+### Q: 如何处理文件重名？
+
+PocketBase 自动使用 UUID 作为文件名：
+
+```
+原始上传: photo.jpg
+存储为:   rxk2z3j1w34o8vj_photo.jpg
+```
+
+### Q: 如何实现断点续传？
+
+使用分块上传：
+
+```javascript
+const CHUNK_SIZE = 1024 * 1024; // 1MB
+
+async function uploadChunked(file) {
+  const chunks = Math.ceil(file.size / CHUNK_SIZE);
+  const uploadId = generateUUID();
+
+  for (let i = 0; i < chunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    const chunk = file.slice(start, end);
+
+    await uploadChunk(uploadId, i, chunk);
+  }
+
+  await completeUpload(uploadId);
+}
+```
+
+### Q: 如何限制上传频率？
+
+在 Hooks 中实现限流：
+
+```javascript
+const uploadCounts = new Map();
+
+onRecordBeforeCreateRequest((e) => {
+  const userId = e.authInfo.id;
+  const count = uploadCounts.get(userId) || 0;
+  const now = Date.now();
+
+  if (now - count.lastTime < 60000 && count.count >= 10) {
+    throw new BadRequestError("上传频率过高，请稍后再试");
+  }
+
+  uploadCounts.set(userId, {
+    count: count.count + 1,
+    lastTime: now,
+  });
+});
+```

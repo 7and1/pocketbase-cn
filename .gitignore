@@ -1,0 +1,27 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+
+node_modules/
+dist/
+.astro/
+.turbo/
+.cache/
+.pnpm-store/
+.wrangler/
+
+apps/backend/pb_data/
+apps/backend/bin/
+apps/backend/deploy/data/
+
+playwright-report/
+test-results/
+coverage/
+
+# Security - never commit these
+.github/SECRETS.md
+*.pem
+*.key
+credentials*.json
+.vscode/

@@ -1,0 +1,500 @@
+---
+title: API 规则与访问控制
+description: 深入理解 API Rules，实现细粒度的数据访问控制
+---
+
+PocketBase 的 API 规则（API Rules）系统让你能够以**声明式的方式控制数据访问权限**。每个集合都有 5 个独立的规则，对应不同的 API 操作。
+
+## 规则概述
+
+### 规则类型
+
+| 规则     | 对应操作            | 说明         |
+| -------- | ------------------- | ------------ |
+| `view`   | GET /api/.../:id    | 查看单条记录 |
+| `list`   | GET /api/...        | 列表查询     |
+| `create` | POST /api/...       | 创建新记录   |
+| `update` | PATCH /api/.../:id  | 更新记录     |
+| `delete` | DELETE /api/.../:id | 删除记录     |
+
+### 规则语法
+
+规则是**布尔表达式**，返回 `true` 允许访问，`false` 拒绝访问。
+
+```
+规则表达式 → 评估为 true 或 false
+true → 允许所有
+false → 拒绝所有
+空字符串 "" → 允许所有（等同于 true）
+```
+
+## 规则变量
+
+### 请求变量
+
+| 变量                     | 类型   | 说明                             |
+| ------------------------ | ------ | -------------------------------- |
+| `@request.auth.id`       | string | 当前登录用户的 ID                |
+| `@request.auth.email`    | string | 当前登录用户的邮箱               |
+| `@request.auth.username` | string | 当前登录用户的用户名             |
+| `@request.auth.verified` | bool   | 当前登录用户是否已验证邮箱       |
+| `@request.auth.<field>`  | any    | 当前登录用户的自定义字段         |
+| `@request.method`        | string | 请求方法 (GET/POST/PATCH/DELETE) |
+| `@request.query.<param>` | any    | 查询参数值                       |
+| `@request.data.<field>`  | any    | 请求数据字段值                   |
+| `@request.id`            | string | 请求的记录 ID (update/delete 时) |
+
+### 集合变量
+
+| 变量               | 类型   | 说明           |
+| ------------------ | ------ | -------------- |
+| `@collection.id`   | string | 当前集合的 ID  |
+| `@collection.name` | string | 当前集合的名称 |
+
+### 其他变量
+
+| 变量    | 类型   | 说明             |
+| ------- | ------ | ---------------- |
+| `@now`  | string | 当前时间戳 (ISO) |
+| `@date` | object | 日期时间辅助函数 |
+
+## 基础规则配置
+
+### 完全公开
+
+允许所有用户（包括未登录）访问：
+
+```javascript
+{
+  "view": "",
+  "list": "",
+  "create": "",
+  "update": "",
+  "delete": ""
+}
+```
+
+### 完全私有
+
+仅管理员可以访问：
+
+```javascript
+{
+  "view": "id = @request.auth.id && @request.auth.role = 'admin'",
+  "list": "id = @request.auth.id && @request.auth.role = 'admin'",
+  "create": "id = @request.auth.id && @request.auth.role = 'admin'",
+  "update": "id = @request.auth.id && @request.auth.role = 'admin'",
+  "delete": "id = @request.auth.id && @request.auth.role = 'admin'"
+}
+```
+
+### 需要登录
+
+任何已登录用户都可以操作：
+
+```javascript
+{
+  "view": "@request.auth.id != ''",
+  "list": "@request.auth.id != ''",
+  "create": "@request.auth.id != ''",
+  "update": "@request.auth.id != ''",
+  "delete": "@request.auth.id != ''"
+}
+```
+
+### 仅所有者
+
+用户只能操作自己创建的记录：
+
+```javascript
+{
+  "view": "owner = @request.auth.id || id = @request.auth.id",
+  "list": "owner = @request.auth.id || id = @request.auth.id",
+  "create": "@request.auth.id != ''",
+  "update": "owner = @request.auth.id || id = @request.auth.id",
+  "delete": "owner = @request.auth.id || id = @request.auth.id"
+}
+```
+
+## 常见规则模式
+
+### 博客文章
+
+```javascript
+{
+  "view": "status = 'published' || author = @request.auth.id || @request.auth.role = 'admin'",
+  "list": "status = 'published' || author = @request.auth.id || @request.auth.role = 'admin'",
+  "create": "@request.auth.id != ''",
+  "update": "author = @request.auth.id || @request.auth.role = 'admin'",
+  "delete": "author = @request.auth.id || @request.auth.role = 'admin'"
+}
+```
+
+**说明：**
+
+- 已发布的文章所有人可见
+- 作者可以查看自己的草稿
+- 管理员可以查看和编辑所有文章
+
+### 私人笔记
+
+```javascript
+{
+  "view": "owner = @request.auth.id",
+  "list": "owner = @request.auth.id",
+  "create": "@request.auth.id != ''",
+  "update": "owner = @request.auth.id",
+  "delete": "owner = @request.auth.id"
+}
+```
+
+### 公开评论
+
+```javascript
+{
+  "view": "status = 'approved'",
+  "list": "status = 'approved'",
+  "create": "@request.auth.id != ''",
+  "update": "author = @request.auth.id || @request.auth.role = 'admin'",
+  "delete": "author = @request.auth.id || @request.auth.role = 'admin'"
+}
+```
+
+### 商店订单
+
+```javascript
+{
+  "view": "customer = @request.auth.id || @request.auth.role = 'admin'",
+  "list": "customer = @request.auth.id || @request.auth.role = 'admin'",
+  "create": "@request.auth.id != ''",
+  "update": "@request.auth.role = 'admin'",
+  "delete": "@request.auth.role = 'admin'"
+}
+```
+
+### 企业数据（多租户）
+
+```javascript
+{
+  "view": "tenantId = @request.auth.tenantId || @request.auth.role = 'admin'",
+  "list": "tenantId = @request.auth.tenantId || @request.auth.role = 'admin'",
+  "create": "@request.auth.id != ''",
+  "update": "tenantId = @request.auth.tenantId || @request.auth.role = 'admin'",
+  "delete": "tenantId = @request.auth.tenantId || @request.auth.role = 'admin'"
+}
+```
+
+## 高级规则表达式
+
+### 比较运算符
+
+| 运算符 | 说明     | 示例                  |
+| ------ | -------- | --------------------- |
+| `=`    | 等于     | `status = 'active'`   |
+| `!=`   | 不等于   | `status != 'deleted'` |
+| `>`    | 大于     | `views > 100`         |
+| `>=`   | 大于等于 | `views >= 100`        |
+| `<`    | 小于     | `price < 1000`        |
+| `<=`   | 小于等于 | `price <= 1000`       |
+| `~`    | 包含     | `title ~ 'keyword'`   |
+| `!~`   | 不包含   | `title !~ 'spam'`     |
+
+### 逻辑运算符
+
+```javascript
+// AND (空格分隔)
+"status = 'published' && featured = true";
+
+// OR
+"status = 'draft' || status = 'archived'";
+
+// 分组
+"(status = 'published' && featured = true) || author = @request.auth.id";
+
+// NOT
+"!(status = 'deleted')";
+```
+
+### 空值检查
+
+```javascript
+// 字段为空
+"publishedAt = null";
+
+// 字段不为空
+"publishedAt != null";
+
+// 字段为空字符串
+"title = ''";
+```
+
+### 数组字段
+
+```javascript
+// tags 包含某个值
+"tags ~ 'javascript'";
+
+// categories 是多选字段，包含某个值
+"categories ~ 'tech'";
+```
+
+### 时间比较
+
+```javascript
+// 发布时间在未来
+"publishedAt > @now";
+
+// 发布时间在过去
+"publishedAt <= @now";
+
+// 使用日期函数
+"@date.before(@now, publishedAt)";
+
+// 7 天内的记录
+"created > @date.now(-7)";
+```
+
+### 关联字段
+
+```javascript
+// 关联的用户已验证
+"expand.author.verified = true";
+
+// 文章分类已激活
+"category.expand.status = 'active'";
+```
+
+## 基于角色的访问控制 (RBAC)
+
+### 定义角色
+
+在 Auth Collection 中添加 role 字段：
+
+```javascript
+{
+  "name": "role",
+  "type": "select",
+  "options": {
+    "values": ["guest", "user", "author", "admin"],
+    "default": "user"
+  }
+}
+```
+
+### 角色规则
+
+```javascript
+// 只有作者和管理员可以创建
+"create": "@request.auth.role = 'author' || @request.auth.role = 'admin'"
+
+// 管理员可以删除所有，作者只能删除自己的
+"delete": "@request.auth.role = 'admin' || (@request.auth.role = 'author' && author = @request.auth.id)"
+
+// 超级管理员
+"update": "@request.auth.role = 'superadmin'"
+```
+
+### 权限级别
+
+```javascript
+// 分级权限
+"create": "(@request.auth.role = 'author' && status = 'draft') || @request.auth.role = 'admin'"
+
+// 发布权限仅管理员
+"update": "!(status = 'published' && @request.auth.role != 'admin') || author = @request.auth.id"
+```
+
+## 验证与邮箱状态
+
+### 要求邮箱验证
+
+```javascript
+// 只允许已验证用户操作
+"create": "@request.auth.verified = true"
+"update": "@request.auth.verified = true || id = @request.auth.id"
+```
+
+### 新用户限制
+
+```javascript
+// 注册 24 小时后才能发布
+"create": "(@request.auth.created < @date.now(-24) || @request.auth.role = 'admin')"
+```
+
+## 委托规则
+
+```javascript
+// 用户只能操作自己部门的记录
+"view": "department = @request.auth.department || @request.auth.role = 'admin'"
+
+// 管理员可以操作所有，用户只能操作自己的
+"update": "@request.auth.role = 'admin' || id = @request.auth.id"
+
+// 父级所有者
+"parent.owner = @request.auth.id || @request.auth.role = 'admin'"
+```
+
+## 防御性编程
+
+### 创建时设置所有者
+
+```javascript
+// create 规则允许所有
+"create": "@request.auth.id != ''"
+
+// 使用 Hooks 强制设置 owner
+onRecordCreateRequest((e) => {
+  e.record.set("owner", e.authInfo.id);
+});
+```
+
+### 防止权限提升
+
+```javascript
+// 不允许用户修改自己的角色
+"update": "!(@request.data.role) || @request.auth.role = 'admin'"
+```
+
+### 防止批量删除
+
+```javascript
+// 在前端使用确认，后端可以添加额外检查
+onRecordBeforeDeleteRequest((e) => {
+  const count = e.dao.findRecordsByExpr(
+    e.record.collection(),
+    `id = '${e.record.id}'`,
+  );
+  if (count.length > 100) {
+    throw new BadRequestError("Cannot delete more than 100 records");
+  }
+});
+```
+
+## 调试规则
+
+### 测试规则
+
+1. 使用 Admin UI 的「规则测试器」
+2. 创建测试账号，不同角色分别测试
+3. 使用浏览器开发者工具查看请求
+
+### 常见错误
+
+```javascript
+// 错误：缺少空格
+"status='published'"; // ❌
+"status = 'published'"; // ✓
+
+// 错误：单引号嵌套
+"status = 'it's ok'"; // ❌
+"status = 'it''s ok'"; // ✓ 使用双单引号转义
+
+// 错误：数字比较字符串
+"views > '100'"; // ❌
+"views > 100"; // ✓
+
+// 错误：未定义字段
+"@request.auth.role = 'admin'"; // ❌ 如果没有 role 字段
+```
+
+## 性能优化
+
+### 规则顺序
+
+将最可能拒绝的条件放在前面：
+
+```javascript
+// 好的做法：先检查最严格的条件
+"@request.auth.role = 'admin' || owner = @request.auth.id";
+
+// 避免：复杂的嵌套
+"((status = 'published' && featured = true) || author = @request.auth.id) || @request.auth.role = 'admin'";
+```
+
+### 使用索引
+
+确保规则中使用的字段有索引：
+
+```javascript
+{
+  "name": "author_idx",
+  "type": "index",
+  "options": {
+    "fields": ["author"]
+  }
+}
+```
+
+## 最佳实践
+
+1. **最小权限原则**：默认拒绝，明确允许
+2. **规则可读性**：使用有意义的字段名和注释
+3. **测试覆盖**：为每种角色编写测试
+4. **审计日志**：记录敏感操作
+5. **定期审查**：定期检查规则是否符合需求
+6. **文档化**：在代码或文档中记录规则意图
+
+## 迁移指南
+
+### 从硬编码到规则
+
+```javascript
+// 旧代码：在业务逻辑中检查
+if (user.role !== 'admin') {
+  throw new Error('Forbidden');
+}
+
+// 新方式：使用规则
+"delete": "@request.auth.role = 'admin'"
+```
+
+### 复杂逻辑到 Hooks
+
+```javascript
+// 规则处理简单权限
+"create": "@request.auth.id != ''"
+
+// Hooks 处理复杂业务逻辑
+onRecordCreateRequest((e) => {
+  if (e.record.get("type") === "premium" && !hasSubscription(e.authInfo)) {
+    throw new BadRequestError("Premium subscription required");
+  }
+});
+```
+
+## 常见问题
+
+### Q: 规则在何时执行？
+
+规则在 API 请求处理前执行，先于 Hooks。如果规则检查失败，请求会被直接拒绝，不会到达 Hooks。
+
+### Q: 如何实现"仅本人和管理员可见"?
+
+```javascript
+{
+  "view": "id = @request.auth.id || @request.auth.role = 'admin'",
+  "list": "id = @request.auth.id || @request.auth.role = 'admin'"
+}
+```
+
+### Q: 如何限制查询自己的数据？
+
+```javascript
+{
+  "list": "userId = @request.auth.id"
+}
+```
+
+### Q: 规则可以访问其他集合吗？
+
+不能直接，但可以通过 `expand` 访问关联字段。复杂场景建议使用 Hooks。
+
+### Q: 如何实现临时访问令牌？
+
+添加临时令牌字段，在规则中检查：
+
+```javascript
+{
+  "view": "token != '' && tokenExpire > @now || id = @request.auth.id"
+}
+```

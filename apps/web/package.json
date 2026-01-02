@@ -1,0 +1,51 @@
+{
+  "name": "apps-web",
+  "type": "module",
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "og": "node scripts/generate-og.mjs",
+    "build": "pnpm og && astro build",
+    "smoke:dist": "node scripts/smoke-dist.mjs",
+    "preview": "astro preview",
+    "astro": "astro",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.37.1",
+    "@astrojs/cloudflare": "^12.6.0",
+    "@astrojs/react": "^4.3.1",
+    "@astrojs/sitemap": "^3.6.0",
+    "@astrojs/tailwind": "^6.0.0",
+    "astro": "^5.6.1",
+    "astro-pagefind": "^1.8.3",
+    "clsx": "^2.1.1",
+    "@nanostores/react": "^1.0.0",
+    "marked": "^15.0.12",
+    "nanostores": "^1.0.0",
+    "pocketbase": "^0.26.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sanitize-html": "^2.17.0",
+    "sharp": "^0.34.2",
+    "tailwind-merge": "^2.6.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.24",
+    "@types/react-dom": "^18.3.7",
+    "@types/sanitize-html": "^2.16.0",
+    "@tailwindcss/aspect-ratio": "^0.4.2",
+    "@tailwindcss/forms": "^0.5.10",
+    "@tailwindcss/typography": "^0.5.16",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.3",
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^3.2.4",
+    "@vitest/coverage-v8": "^3.2.4",
+    "jsdom": "^26.1.0"
+  }
+}

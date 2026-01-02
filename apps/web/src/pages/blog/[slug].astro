@@ -1,0 +1,225 @@
+---
+export const prerender = false;
+
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { getCollection } from "astro:content";
+import { SITE_URL } from "@/lib/constants/config";
+
+const { slug } = Astro.params;
+if (!slug) return Astro.redirect("/blog");
+
+const posts = await getCollection("blog");
+const post = posts.find((p) => p.slug === slug);
+
+if (!post || post.data.draft) {
+  return Astro.redirect("/blog");
+}
+
+const publishDate = new Date(post.data.publishDate).toLocaleDateString("zh-CN", {
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+});
+
+const updatedDate = post.data.updatedDate
+  ? new Date(post.data.updatedDate).toLocaleDateString("zh-CN", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    })
+  : null;
+
+const { Content } = await post.render();
+
+const relatedPosts = posts
+  .filter((p) => p.slug !== slug && !p.data.draft)
+  .filter((p) =>
+    p.data.category === post.data.category ||
+    p.data.tags.some((tag) => post.data.tags.includes(tag))
+  )
+  .sort((a, b) => b.data.publishDate.valueOf() - a.data.publishDate.valueOf())
+  .slice(0, 4);
+
+const canonical = new URL(`/blog/${slug}/`, SITE_URL).toString();
+
+const isTutorial = post.data.category === "教程" || post.data.tags.some((t: string) =>
+  ["教程", "tutorial", "指南", "guide", "入门", "实战"].includes(t.toLowerCase())
+);
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": isTutorial ? "TechArticle" : "Article",
+  headline: post.data.title,
+  description: post.data.description,
+  datePublished: post.data.publishDate.toISOString(),
+  dateModified: post.data.updatedDate?.toISOString() || post.data.publishDate.toISOString(),
+  author: {
+    "@type": "Organization",
+    name: post.data.author,
+  },
+  publisher: {
+    "@type": "Organization",
+    name: "PocketBase.cn",
+    logo: {
+      "@type": "ImageObject",
+      url: new URL("/og-image.png", SITE_URL).toString(),
+    },
+  },
+  url: canonical,
+  mainEntityOfPage: canonical,
+  keywords: post.data.tags.join(", "),
+  ...(isTutorial && {
+    proficiencyLevel: "Beginner",
+    dependencies: "PocketBase, Node.js",
+  }),
+};
+
+const howToSchema = isTutorial ? {
+  "@context": "https://schema.org",
+  "@type": "HowTo",
+  name: post.data.title,
+  description: post.data.description,
+  totalTime: "PT30M",
+  tool: [
+    { "@type": "HowToTool", name: "PocketBase" },
+    { "@type": "HowToTool", name: "Node.js" },
+    { "@type": "HowToTool", name: "终端/命令行" },
+  ],
+  step: [
+    {
+      "@type": "HowToStep",
+      position: 1,
+      name: "阅读本教程",
+      text: post.data.description,
+      url: canonical,
+    },
+  ],
+} : null;
+
+const tableOfContents = post.render()?.then?.((r) => {
+  const headings = r?.remarkPluginFrontmatter?.headings;
+  return headings || [];
+}) || [];
+---
+
+<BaseLayout
+  title={`${post.data.title} - PocketBase.cn`}
+  description={post.data.description}
+  canonical={canonical}
+>
+  <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+  {howToSchema ? (
+    <script type="application/ld+json" set:html={JSON.stringify(howToSchema)} />
+  ) : null}
+
+  <article class="mx-auto max-w-3xl">
+    <nav class="text-sm text-neutral-600 dark:text-neutral-400">
+      <a href="/blog" class="hover:text-neutral-900 dark:hover:text-neutral-100">
+        博客
+      </a>
+      <span class="mx-2">/</span>
+      <span>{post.data.category}</span>
+    </nav>
+
+    <header class="mt-6">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="rounded bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 dark:bg-brand-900/30 dark:text-brand-300">
+          {post.data.category}
+        </span>
+        {post.data.featured ? (
+          <span class="rounded bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+            精选
+          </span>
+        ) : null}
+      </div>
+
+      <h1 class="mt-4 text-3xl font-semibold tracking-tight md:text-4xl">
+        {post.data.title}
+      </h1>
+
+      <p class="mt-4 text-lg text-neutral-700 dark:text-neutral-300">
+        {post.data.description}
+      </p>
+
+      <div class="mt-6 flex flex-wrap items-center gap-4 text-sm text-neutral-600 dark:text-neutral-400">
+        <div class="flex items-center gap-2">
+          <span class="font-medium">{post.data.author}</span>
+        </div>
+        <span>·</span>
+        <time datetime={post.data.publishDate.toISOString()}>
+          {publishDate}
+        </time>
+        {updatedDate ? (
+          <>
+            <span>·</span>
+            <span>更新于 {updatedDate}</span>
+          </>
+        ) : null}
+      </div>
+
+      {post.data.tags.length > 0 ? (
+        <div class="mt-4 flex flex-wrap gap-2">
+          {post.data.tags.map((tag) => (
+            <a
+              href={`/blog?tag=${encodeURIComponent(tag)}`}
+              class="rounded-full bg-neutral-100 px-3 py-1 text-sm text-neutral-700 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+            >
+              #{tag}
+            </a>
+          ))}
+        </div>
+      ) : null}
+    </header>
+
+    <hr class="mt-8 border-neutral-200 dark:border-neutral-800" />
+
+    <div class="prose prose-neutral mt-8 max-w-none dark:prose-invert md:prose-lg">
+      <Content />
+    </div>
+
+    <hr class="mt-12 border-neutral-200 dark:border-neutral-800" />
+
+    <footer class="mt-8">
+      <div class="flex items-center justify-between">
+        <a
+          href="/blog"
+          class="inline-flex items-center gap-1 text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+        >
+          <span>&larr;</span>
+          <span>返回博客</span>
+        </a>
+      </div>
+    </footer>
+  </article>
+
+  {relatedPosts.length > 0 ? (
+    <section class="mx-auto mt-16 max-w-3xl">
+      <h2 class="text-xl font-semibold">相关文章</h2>
+      <div class="mt-4 grid gap-4 md:grid-cols-2">
+        {relatedPosts.map((related) => (
+          <a
+            href={`/blog/${related.slug}`}
+            class="rounded-xl border border-neutral-200 p-4 transition-colors hover:border-neutral-300 dark:border-neutral-800 dark:hover:border-neutral-700"
+          >
+            <span class="text-xs text-brand-700 dark:text-brand-300">
+              {related.data.category}
+            </span>
+            <h3 class="mt-2 font-medium group-hover:text-brand-700">
+              {related.data.title}
+            </h3>
+            <p class="mt-1 line-clamp-2 text-sm text-neutral-600 dark:text-neutral-400">
+              {related.data.description}
+            </p>
+            <time class="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
+              {new Date(related.data.publishDate).toLocaleDateString("zh-CN", {
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+              })}
+            </time>
+          </a>
+        ))}
+      </div>
+    </section>
+  ) : null}
+</BaseLayout>

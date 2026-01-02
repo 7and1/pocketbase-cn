@@ -1,0 +1,75 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import ShowcaseBrowser from "@/components/showcase/ShowcaseBrowser";
+---
+
+<BaseLayout title="PocketBase 案例展示 - 真实项目与成功故事" description="探索使用 PocketBase 构建的真实项目案例，包括 Web 应用、移动应用、SaaS 产品等。获取灵感，学习最佳实践。">
+  <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">PocketBase 案例展示</h1>
+      <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+        探索社区使用 PocketBase 构建的真实项目，获取灵感和最佳实践。
+      </p>
+    </div>
+    <a
+      class="inline-flex items-center justify-center rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+      href="/showcase/submit"
+    >
+      提交案例
+    </a>
+  </div>
+
+  <!-- SEO Content Section -->
+  <section class="mt-8 rounded-xl border border-neutral-200 bg-neutral-50 p-6 dark:border-neutral-800 dark:bg-neutral-900">
+    <h2 class="text-lg font-semibold">为什么展示您的项目？</h2>
+    <p class="mt-3 text-sm text-neutral-600 dark:text-neutral-400">
+      分享您的 PocketBase 项目可以帮助社区其他开发者了解 PocketBase 的实际应用场景，同时也能为您的项目带来曝光机会。无论是一个简单的个人项目，还是一个复杂的商业应用，我们都欢迎您的分享。
+    </p>
+
+    <h3 class="mt-6 text-md font-semibold">项目类型</h3>
+    <ul class="mt-3 grid gap-3 md:grid-cols-2 text-sm text-neutral-600 dark:text-neutral-400">
+      <li class="flex items-start gap-2">
+        <span class="text-brand-600">🌐</span>
+        <span><strong>Web 应用：</strong>SaaS 产品、内容管理、电商平台、协作工具</span>
+      </li>
+      <li class="flex items-start gap-2">
+        <span class="text-brand-600">📱</span>
+        <span><strong>移动应用：</strong>React Native、Flutter 原生应用的后端服务</span>
+      </li>
+      <li class="flex items-start gap-2">
+        <span class="text-brand-600">🎮</span>
+        <span><strong>游戏服务：</strong>排行榜、用户系统、游戏数据存储</span>
+      </li>
+      <li class="flex items-start gap-2">
+        <span class="text-brand-600">🏢</span>
+        <span><strong>企业应用：</strong>内部工具、管理系统、数据分析平台</span>
+      </li>
+      <li class="flex items-start gap-2">
+        <span class="text-brand-600">🤖</span>
+        <span><strong>API 服务：</strong>RESTful API、GraphQL、微服务后端</span>
+      </li>
+      <li class="flex items-start gap-2">
+        <span class="text-brand-600">⚡</span>
+        <span><strong>MVP 产品：</strong>快速验证想法的初创项目</span>
+      </li>
+    </ul>
+
+    <h3 class="mt-6 text-md font-semibold">提交指南</h3>
+    <ol class="mt-3 list-decimal pl-6 space-y-2 text-sm text-neutral-600 dark:text-neutral-400">
+      <li>项目必须真实使用 PocketBase 作为后端</li>
+      <li>提供项目描述、技术栈和使用场景</li>
+      <li>分享项目链接（如果公开）或截图</li>
+      <li>说明开发过程中遇到的挑战和解决方案</li>
+      <li>包含您的 GitHub 或社交媒体链接（可选）</li>
+    </ol>
+
+    <h3 class="mt-6 text-md font-semibold">精选项目</h3>
+    <p class="mt-3 text-sm text-neutral-600 dark:text-neutral-400">
+      我们会定期挑选具有代表性的项目作为"精选案例"，在首页展示。精选项目通常具有：创新的应用场景、出色的技术实现、详细的开发文档、良好的用户体验等特点。
+    </p>
+  </section>
+
+  <div class="mt-6">
+    <ShowcaseBrowser client:load />
+  </div>
+</BaseLayout>

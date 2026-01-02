@@ -1,0 +1,112 @@
+---
+/**
+ * RelatedDocs Component
+ *
+ * Displays related documentation based on the current document's category.
+ * Helps with internal linking and SEO.
+ */
+import { POCKETBASE_URL } from "@/lib/constants/config";
+
+interface Props {
+  currentCategory?: string;
+  currentSlug?: string;
+  limit?: number;
+}
+
+const {
+  currentCategory = "",
+  currentSlug = "",
+  limit = 5
+} = Astro.props;
+
+// Fetch related docs from the API
+let relatedDocs: any[] = [];
+
+if (currentCategory) {
+  try {
+    const res = await fetch(
+      `${POCKETBASE_URL}/api/docs/related?category=${encodeURIComponent(currentCategory)}&exclude=${encodeURIComponent(currentSlug)}&limit=${limit}`,
+      {
+        headers: { Accept: "application/json" }
+      }
+    );
+    if (res.ok) {
+      const json = await res.json();
+      relatedDocs = json?.data || [];
+    }
+  } catch (e) {
+    // Silently fail - API might not support this endpoint yet
+    relatedDocs = [];
+  }
+}
+
+// Fallback: Show static related links if API returns empty
+const fallbackLinks = currentCategory?.includes("guide")
+  ? [
+      { title: "快速入门", slug: "getting-started", description: "5分钟快速上手 PocketBase" },
+      { title: "API 参考", slug: "api-overview", description: "完整的 API 文档参考" },
+      { title: "部署指南", slug: "deployment", description: "生产环境部署最佳实践" }
+    ]
+  : currentCategory?.includes("api")
+  ? [
+      { title: "集合 API", slug: "collections-api", description: "管理数据库集合" },
+      { title: "记录 API", slug: "records-api", description: "CRUD 操作详解" },
+      { title: "用户认证", slug: "auth-api", description: "用户注册与登录" }
+    ]
+  : [
+      { title: "概述", slug: "overview", description: "PocketBase 简介" },
+      { title: "常见问题", slug: "faq", description: "开发中常见问题解答" }
+    ];
+
+const displayDocs = relatedDocs.length > 0 ? relatedDocs : fallbackLinks.slice(0, limit);
+---
+
+{displayDocs.length > 0 && (
+  <aside class="rounded-xl border border-neutral-200 bg-neutral-50 p-6 dark:border-neutral-800 dark:bg-neutral-900">
+    <h3 class="text-lg font-semibold">相关文档</h3>
+    <p class="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+      推荐阅读以下相关内容
+    </p>
+
+    <ul class="mt-4 space-y-3">
+      {displayDocs.map((doc) => (
+        <li>
+          <a
+            href={`/docs/${doc.slug}`}
+            class="group block rounded-lg p-3 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          >
+            <div class="flex items-start gap-3">
+              <span class="mt-0.5 text-brand-600 dark:text-brand-400">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+                  <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+                </svg>
+              </span>
+              <div class="min-w-0 flex-1">
+                <h4 class="font-medium text-neutral-900 group-hover:text-brand-700 dark:text-neutral-100 dark:group-hover:text-brand-300">
+                  {doc.title}
+                </h4>
+                {doc.description && (
+                  <p class="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+                    {doc.description}
+                  </p>
+                )}
+              </div>
+            </div>
+          </a>
+        </li>
+      ))}
+    </ul>
+
+    <a
+      href="/docs"
+      class="mt-4 inline-flex items-center gap-1 text-sm font-medium text-brand-700 hover:underline dark:text-brand-300"
+    >
+      查看所有文档
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 12h14"/>
+        <path d="m12 5 7 7-7 7"/>
+      </svg>
+    </a>
+  </aside>
+}

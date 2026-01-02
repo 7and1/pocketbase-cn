@@ -1,0 +1,219 @@
+name: Backend Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/backend/**"
+      - ".github/workflows/backend-deploy.yml"
+      - "pnpm-lock.yaml"
+  workflow_dispatch:
+
+env:
+  PB_VERSION: "0.23.4"
+  DEPLOY_PATH: /opt/pocketbase
+
+jobs:
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run npm audit
+        run: pnpm audit --audit-level=high
+        continue-on-error: false
+
+      - name: Dependency check
+        run: |
+          echo "Checking for outdated dependencies..."
+          pnpm outdated || true
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: security-scan
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download PocketBase
+        run: pnpm backend:download
+
+      - name: Apply migrations
+        run: pnpm backend:migrate
+
+      - name: Run smoke tests
+        run: |
+          pnpm backend:dev &
+          PB_PID=$!
+          echo "Started PocketBase with PID: $PB_PID"
+
+          # Wait for PocketBase to start
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8090/api/live >/dev/null 2>&1; then
+              echo "PocketBase is ready"
+              break
+            fi
+            echo "Waiting for PocketBase... ($i/30)"
+            sleep 1
+          done
+
+          # Run smoke tests
+          pnpm backend:smoke
+
+          # Cleanup
+          kill $PB_PID || true
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: test
+    environment:
+      name: production
+      url: https://pocketbase.cn
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v2.0.0
+        with:
+          host: ${{ secrets.PRODUCTION_SSH_HOST }}
+          port: ${{ secrets.PRODUCTION_SSH_PORT || 22 }}
+          username: ${{ secrets.PRODUCTION_SSH_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            echo "[deploy] Starting deployment to production..."
+
+            # Create backup before deployment
+            BACKUP_FILE="/tmp/pocketbase_pre_deploy_$(date +%Y%m%d_%H%M%S).tar.gz"
+            echo "[deploy] Creating backup: $BACKUP_FILE"
+            tar -C /opt/pocketbase -czf "$BACKUP_FILE" pb_data || true
+            echo "[deploy] Backup created"
+
+            # Deploy new code
+            echo "[deploy] Creating temporary deploy directory..."
+            DEPLOY_TEMP="/opt/pocketbase.deploy.tmp"
+            rm -rf "$DEPLOY_TEMP"
+            mkdir -p "$DEPLOY_TEMP"
+
+            echo "[deploy] Downloading new PocketBase binary..."
+            cd "$DEPLOY_TEMP"
+            PB_VERSION="${{ env.PB_VERSION }}"
+            PB_OS="linux"
+            PB_ARCH="$(uname -m)"
+            case "$PB_ARCH" in
+              x86_64|amd64) PB_ARCH="amd64" ;;
+              arm64|aarch64) PB_ARCH="arm64" ;;
+            esac
+
+            ZIP_NAME="pocketbase_${PB_VERSION}_${PB_OS}_${PB_ARCH}.zip"
+            URL="https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/${ZIP_NAME}"
+
+            curl -fsSL "$URL" -o "/tmp/$ZIP_NAME"
+            unzip -q "/tmp/$ZIP_NAME" -d "$DEPLOY_TEMP"
+            chmod +x "$DEPLOY_TEMP/pocketbase"
+            rm -f "/tmp/$ZIP_NAME"
+
+            echo "[deploy] Deploying application files..."
+            rsync -av --delete \
+              --exclude='pb_data/' \
+              --exclude='pb_data.db' \
+              --exclude='auxiliary.db' \
+              --exclude='.env' \
+              --exclude='bin/' \
+              --exclude='node_modules/' \
+              /opt/pocketbase.deploy.repo/apps/backend/ "$DEPLOY_TEMP/"
+
+            # Copy the new binary to deploy temp
+            cp "$DEPLOY_TEMP/pocketbase" /opt/pocketbase/
+
+            echo "[deploy] Running migrations..."
+            cd "$DEPLOY_TEMP"
+            ./pocketbase migrate up \
+              --dir /opt/pocketbase/pb_data \
+              --hooksDir "$DEPLOY_TEMP/pb_hooks" \
+              --migrationsDir "$DEPLOY_TEMP/pb_migrations" \
+              --publicDir "$DEPLOY_TEMP/pb_public"
+
+            echo "[deploy] Updating hooks and public files..."
+            rsync -av "$DEPLOY_TEMP/pb_hooks/" /opt/pocketbase/pb_hooks/
+            rsync -av "$DEPLOY_TEMP/pb_migrations/" /opt/pocketbase/pb_migrations/
+            rsync -av "$DEPLOY_TEMP/pb_public/" /opt/pocketbase/pb_public/
+
+            echo "[deploy] Cleaning up..."
+            rm -rf "$DEPLOY_TEMP"
+
+            echo "[deploy] Restarting PocketBase service..."
+            systemctl reload pocketbase || systemctl restart pocketbase
+
+            echo "[deploy] Waiting for service to be ready..."
+            for i in {1..30}; do
+              if curl -fsS http://127.0.0.1:8090/api/live >/dev/null 2>&1; then
+                echo "[deploy] Service is ready"
+                break
+              fi
+              echo "[deploy] Waiting for service... ($i/30)"
+              sleep 2
+            done
+
+            echo "[deploy] Deployment completed successfully"
+
+      - name: Health check
+        run: |
+          sleep 5
+          curl -f ${{ secrets.PRODUCTION_URL }}/api/live || exit 1
+          curl -f ${{ secrets.PRODUCTION_URL }}/api/ready || exit 1
+
+      - name: Notify success
+        if: success()
+        run: |
+          if [ -n "${{ secrets.ALERT_WEBHOOK_URL }}" ]; then
+            curl -X POST "${{ secrets.ALERT_WEBHOOK_URL }}" \
+              -H "Content-Type: application/json" \
+              -d '{"text":"✅ Backend deployed to production successfully"}'
+          fi
+
+      - name: Notify failure
+        if: failure()
+        run: |
+          if [ -n "${{ secrets.ALERT_WEBHOOK_URL }}" ]; then
+            curl -X POST "${{ secrets.ALERT_WEBHOOK_URL }}" \
+              -H "Content-Type: application/json" \
+              -d '{"text":"❌ Backend deployment to production failed"}'
+          fi

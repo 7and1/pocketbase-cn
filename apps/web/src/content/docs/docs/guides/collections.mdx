@@ -1,0 +1,706 @@
+---
+title: 集合与字段
+description: 集合设计、字段类型配置、索引优化与数据建模最佳实践
+---
+
+集合（Collection）是 PocketBase 中数据组织的基本单位，类似于传统数据库中的表。理解集合的设计原理和字段配置是构建高效应用的基础。
+
+## 集合类型
+
+### Base 集合
+
+Base 集合用于存储普通数据，如文章、评论、配置等。
+
+**特点：**
+
+- 标准 CRUD 操作
+- 支持所有字段类型
+- 通过规则控制访问权限
+
+**适用场景：**
+
+- 博客文章
+- 商品信息
+- 系统配置
+- 日志记录
+
+### Auth 集合
+
+Auth 集合专门用于用户认证，在 Base 集合的基础上增加了认证相关功能。
+
+**内置字段：**
+
+| 字段名            | 类型     | 说明                   |
+| ----------------- | -------- | ---------------------- |
+| `id`              | text     | 主键                   |
+| `collectionId`    | text     | 集合 ID                |
+| `collectionName`  | text     | 集合名称               |
+| `username`        | text     | 用户名（可选）         |
+| `email`           | email    | 邮箱（可选）           |
+| `emailVisibility` | bool     | 邮箱是否对其他用户可见 |
+| `verified`        | bool     | 邮箱是否已验证         |
+| `tokenKey`        | text     | 用于重置密码的 token   |
+| `password`        | password | 加密存储的密码         |
+| `passwordHash`    | text     | 密码哈希值             |
+| `passwordConfirm` | password | 密码确认（创建时）     |
+| `created`         | date     | 创建时间               |
+| `updated`         | date     | 更新时间               |
+
+**扩展字段示例：**
+
+```javascript
+// Auth 集合可以添加自定义字段
+{
+  "name": "users",
+  "type": "auth",
+  "fields": [
+    // 内置字段...
+    { "name": "role", "type": "select", "options": ["user", "admin", "moderator"] },
+    { "name": "avatar", "type": "file" },
+    { "name": "bio", "type": "text" },
+    { "name": "githubId", "type": "text" },
+    { "name": "settings", "type": "json" }
+  ]
+}
+```
+
+## 字段类型详解
+
+### 基础类型
+
+#### text
+
+单行文本字段，适合短文本内容。
+
+```javascript
+{
+  "name": "title",
+  "type": "text",
+  "required": true,
+  "options": {
+    "min": 1,
+    "max": 200
+  }
+}
+```
+
+**使用场景：** 标题、名称、用户名
+
+#### editor
+
+富文本编辑器字段，通常存储 HTML。
+
+```javascript
+{
+  "name": "content",
+  "type": "editor",
+  "required": true
+}
+```
+
+**使用场景：** 文章内容、页面内容、描述
+
+#### number
+
+数字字段，支持整数和小数。
+
+```javascript
+{
+  "name": "price",
+  "type": "number",
+  "required": true,
+  "options": {
+    "min": 0,
+    "max": 1000000
+  }
+}
+```
+
+**使用场景：** 价格、数量、评分、排序权重
+
+#### date
+
+日期时间字段，存储 ISO 8601 格式。
+
+```javascript
+{
+  "name": "publishedAt",
+  "type": "date"
+}
+```
+
+**使用场景：** 发布时间、过期时间、生日
+
+#### bool
+
+布尔值字段，true/false。
+
+```javascript
+{
+  "name": "featured",
+  "type": "bool",
+  "options": {
+    "default": false
+  }
+}
+```
+
+**使用场景：** 是否推荐、是否启用、开关状态
+
+#### email
+
+邮箱字段，自动验证格式。
+
+```javascript
+{
+  "name": "contactEmail",
+  "type": "email"
+}
+```
+
+#### url
+
+URL 字段，自动验证格式。
+
+```javascript
+{
+  "name": "website",
+  "type": "url"
+}
+```
+
+### 选择类型
+
+#### select
+
+单选下拉框。
+
+```javascript
+{
+  "name": "status",
+  "type": "select",
+  "required": true,
+  "options": {
+    "values": ["draft", "published", "archived"],
+    "default": "draft"
+  }
+}
+```
+
+#### select（多选）
+
+支持选择多个值。
+
+```javascript
+{
+  "name": "tags",
+  "type": "select",
+  "options": {
+    "values": ["javascript", "python", "go", "rust"],
+    "maxSelect": 3
+  }
+}
+```
+
+### 关系类型
+
+#### relation
+
+关联其他集合的记录。
+
+```javascript
+{
+  "name": "author",
+  "type": "relation",
+  "required": true,
+  "options": {
+    "collectionId": "pbc_users_collection_id",
+    "cascadeDelete": false,
+    "minSelect": 1,
+    "maxSelect": 1
+  }
+}
+```
+
+**关联配置：**
+
+| 选项            | 说明                           |
+| --------------- | ------------------------------ |
+| `collectionId`  | 关联的集合 ID                  |
+| `cascadeDelete` | 删除记录时是否同时删除关联记录 |
+| `minSelect`     | 最少选择数量                   |
+| `maxSelect`     | 最多选择数量（1 表示单选）     |
+
+**一对多关系：**
+
+```javascript
+// Post 集合
+{
+  "name": "category",
+  "type": "relation",
+  "options": {
+    "collectionId": "categories_id",
+    "maxSelect": 1  // 一对多
+  }
+}
+
+// Category 集合（反向关联）
+{
+  "name": "posts",
+  "type": "relation",
+  "options": {
+    "collectionId": "posts_id",
+    "maxSelect": null  // 一对多
+  }
+}
+```
+
+**多对多关系：**
+
+```javascript
+// Article 集合
+{
+  "name": "tags",
+  "type": "relation",
+  "options": {
+    "collectionId": "tags_id",
+    "maxSelect": null
+  }
+}
+```
+
+### 文件类型
+
+#### file
+
+文件上传字段。
+
+```javascript
+{
+  "name": "avatar",
+  "type": "file",
+  "required": false,
+  "options": {
+    "maxSelect": 1,
+    "maxSize": 5242880,  // 5MB
+    "mimeTypes": ["image/jpeg", "image/png", "image/webp"],
+    "protected": false  // 公开访问
+  }
+}
+```
+
+**多文件上传：**
+
+```javascript
+{
+  "name": "gallery",
+  "type": "file",
+  "options": {
+    "maxSelect": 10,
+    "maxSize": 10485760,  // 10MB
+    "mimeTypes": ["image/*", "video/mp4"],
+    "thumbs": ["200x200", "800x600"]
+  }
+}
+```
+
+### JSON 类型
+
+#### json
+
+存储 JSON 数据，适合灵活的结构。
+
+```javascript
+{
+  "name": "metadata",
+  "type": "json",
+  "options": {}
+}
+```
+
+**使用场景：**
+
+- 用户偏好设置
+- 动态配置
+- 扩展属性
+- 第三方数据
+
+## 索引设计
+
+### 何时需要索引
+
+索引能显著提升查询性能，但会增加写入开销。以下场景建议创建索引：
+
+1. **高频过滤字段**
+2. **排序字段**
+3. **关联查询的外键**
+4. **唯一性约束字段**
+
+### 索引类型
+
+#### 单列索引
+
+```javascript
+{
+  "name": "status_idx",
+  "type": "index",
+  "options": {
+    "fields": ["status"]
+  }
+}
+```
+
+#### 复合索引
+
+```javascript
+{
+  "name": "user_resource_idx",
+  "type": "index",
+  "options": {
+    "fields": ["userId", "resourceId"],
+    "unique": true
+  }
+}
+```
+
+#### 唯一索引
+
+确保字段值唯一：
+
+```javascript
+{
+  "name": "slug_unique",
+  "type": "index",
+  "options": {
+    "fields": ["slug"],
+    "unique": true
+  }
+}
+```
+
+### 常见索引模式
+
+```javascript
+// 文章列表查询优化
+// 查询: filter=status='published' && sort=-publishedAt
+{
+  "name": "posts_list_idx",
+  "type": "index",
+  "options": {
+    "fields": ["status", "publishedAt"]
+  }
+}
+
+// 用户登录优化
+// 查询: filter=username='xxx' || email='xxx'
+{
+  "name": "user_login_idx",
+  "type": "index",
+  "options": {
+    "fields": ["username"]
+  }
+}
+{
+  "name": "user_email_idx",
+  "type": "index",
+  "options": {
+    "fields": ["email"],
+    "unique": true
+  }
+}
+
+// 关联查询优化
+// 查询: filter=authorId='xxx' && sort=-created
+{
+  "name": "posts_author_idx",
+  "type": "index",
+  "options": {
+    "fields": ["authorId", "created"]
+  }
+}
+```
+
+## 访问规则（API Rules）
+
+规则是布尔表达式，用于控制数据访问权限。
+
+### 规则变量
+
+| 变量                  | 说明                              |
+| --------------------- | --------------------------------- |
+| `@request.auth.id`    | 当前登录用户 ID                   |
+| `@request.auth.email` | 当前登录用户邮箱                  |
+| `@request.auth.role`  | 当前登录用户角色（自定义字段）    |
+| `@request.method`     | 请求方法（GET/POST/PATCH/DELETE） |
+| `@request.query.key`  | 查询参数值                        |
+| `@request.data.field` | 请求数据字段值                    |
+| `@request.id`         | 请求的记录 ID（update/delete 时） |
+| `@collection.name`    | 当前集合名称                      |
+| `@collection.id`      | 当前集合 ID                       |
+| `@now`                | 当前时间戳                        |
+
+### CRUD 规则配置
+
+```javascript
+// 完全公开
+{
+  "create": "",
+  "view": "",
+  "update": "",
+  "delete": "",
+  "list": ""
+}
+
+// 完全私有（仅管理员）
+{
+  "create": "id = @request.auth.id && @request.auth.role='admin'",
+  "view": "id = @request.auth.id && @request.auth.role='admin'",
+  "update": "id = @request.auth.id && @request.auth.role='admin'",
+  "delete": "id = @request.auth.id && @request.auth.role='admin'",
+  "list": "id = @request.auth.id && @request.auth.role='admin'"
+}
+
+// 用户只能操作自己的数据
+{
+  "create": "",  // 允许创建
+  "view": "owner = @request.auth.id || id = @request.auth.id",
+  "update": "owner = @request.auth.id || id = @request.auth.id",
+  "delete": "owner = @request.auth.id || id = @request.auth.id",
+  "list": "owner = @request.auth.id || id = @request.auth.id"
+}
+
+// 博客文章规则
+{
+  "create": "@request.auth.id != ''",  // 需要登录
+  "view": "",  // 公开可查看
+  "update": "author = @request.auth.id || @request.auth.role='admin'",
+  "delete": "author = @request.auth.id || @request.auth.role='admin'",
+  "list": ""  // 公开可列表
+}
+```
+
+### 规则最佳实践
+
+1. **从最小权限开始**：默认拒绝，明确允许
+2. **使用角色控制**：通过 auth 集合的 role 字段
+3. **测试规则**：在 Admin UI 中用不同身份测试
+4. **规则复用**：相似的规则保持一致
+
+## 数据建模示例
+
+### 博客系统
+
+```javascript
+// posts 集合
+{
+  "name": "posts",
+  "type": "base",
+  "fields": [
+    { "name": "title", "type": "text", "required": true },
+    { "name": "slug", "type": "text", "required": true, "unique": true },
+    { "name": "content", "type": "editor", "required": true },
+    { "name": "excerpt", "type": "text" },
+    { "name": "cover", "type": "file" },
+    { "name": "status", "type": "select", "options": {
+      "values": ["draft", "published", "archived"],
+      "default": "draft"
+    }},
+    { "name": "category", "type": "relation", "options": {
+      "collectionId": "categories_id",
+      "maxSelect": 1
+    }},
+    { "name": "tags", "type": "relation", "options": {
+      "collectionId": "tags_id"
+    }},
+    { "name": "author", "type": "relation", "options": {
+      "collectionId": "users_id",
+      "maxSelect": 1
+    }},
+    { "name": "featured", "type": "bool", "options": {
+      "default": false
+    }},
+    { "name": "views", "type": "number", "options": {
+      "default": 0
+    }},
+    { "name": "publishedAt", "type": "date" }
+  ],
+  "indexes": [
+    { "name": "slug_idx", "type": "index", "options": {
+      "fields": ["slug"], "unique": true
+    }},
+    { "name": "status_published_idx", "type": "index", "options": {
+      "fields": ["status", "publishedAt"]
+    }}
+  ],
+  "rules": {
+    "create": "@request.auth.id != ''",
+    "view": "status = 'published' || author = @request.auth.id || @request.auth.role = 'admin'",
+    "update": "author = @request.auth.id || @request.auth.role = 'admin'",
+    "delete": "author = @request.auth.id || @request.auth.role = 'admin'",
+    "list": "status = 'published' || author = @request.auth.id || @request.auth.role = 'admin'"
+  }
+}
+```
+
+### 电商系统
+
+```javascript
+// products 集合
+{
+  "name": "products",
+  "type": "base",
+  "fields": [
+    { "name": "name", "type": "text", "required": true },
+    { "name": "slug", "type": "text", "required": true },
+    { "name": "description", "type": "editor" },
+    { "name": "images", "type": "file", "options": {
+      "maxSelect": 10
+    }},
+    { "name": "price", "type": "number", "required": true },
+    { "name": "comparePrice", "type": "number" },
+    { "name": "sku", "type": "text", "unique": true },
+    { "name": "stock", "type": "number", "options": {
+      "default": 0
+    }},
+    { "name": "category", "type": "relation" },
+    { "name": "variants", "type": "json" },
+    { "name": "active", "type": "bool", "options": {
+      "default": true
+    }}
+  ]
+}
+
+// orders 集合
+{
+  "name": "orders",
+  "type": "base",
+  "fields": [
+    { "name": "orderNumber", "type": "text", "required": true, "unique": true },
+    { "name": "customer", "type": "relation", "options": {
+      "collectionId": "users_id",
+      "maxSelect": 1
+    }},
+    { "name": "items", "type": "json" },
+    { "name": "total", "type": "number", "required": true },
+    { "name": "status", "type": "select", "options": {
+      "values": ["pending", "paid", "shipped", "delivered", "cancelled"],
+      "default": "pending"
+    }},
+    { "name": "shippingAddress", "type": "json" },
+    { "name": "paidAt", "type": "date" }
+  ],
+  "rules": {
+    "create": "@request.auth.id != ''",
+    "view": "customer = @request.auth.id || @request.auth.role = 'admin'",
+    "update": "@request.auth.role = 'admin'",
+    "delete": "@request.auth.role = 'admin'",
+    "list": "customer = @request.auth.id || @request.auth.role = 'admin'"
+  }
+}
+```
+
+### 评论系统
+
+```javascript
+// comments 集合
+{
+  "name": "comments",
+  "type": "base",
+  "fields": [
+    { "name": "content", "type": "text", "required": true },
+    { "name": "post", "type": "relation", "options": {
+      "collectionId": "posts_id",
+      "maxSelect": 1
+    }},
+    { "name": "author", "type": "relation", "options": {
+      "collectionId": "users_id",
+      "maxSelect": 1
+    }},
+    { "name": "parent", "type": "relation", "options": {
+      "collectionId": "comments_id",
+      "maxSelect": 1
+    }},
+    { "name": "status", "type": "select", "options": {
+      "values": ["pending", "approved", "rejected"],
+      "default": "pending"
+    }}
+  ],
+  "rules": {
+    "create": "@request.auth.id != ''",
+    "view": "status = 'approved' || author = @request.auth.id",
+    "update": "@request.auth.role = 'admin'",
+    "delete": "author = @request.auth.id || @request.auth.role = 'admin'",
+    "list": "status = 'approved' || author = @request.auth.id"
+  }
+}
+```
+
+## 常见问题
+
+### Q: 如何实现软删除？
+
+添加 `deletedAt` 字段：
+
+```javascript
+{
+  "name": "deletedAt",
+  "type": "date"
+}
+```
+
+查询时过滤已删除记录：
+
+```javascript
+filter = deletedAt = null;
+```
+
+### Q: 如何实现多租户？
+
+添加 `tenantId` 字段：
+
+```javascript
+{
+  "name": "tenantId",
+  "type": "text",
+  "required": true
+}
+```
+
+规则中限制：
+
+```javascript
+{
+  "view": "tenantId = @request.auth.tenantId",
+  "list": "tenantId = @request.auth.tenantId"
+}
+```
+
+### Q: 如何存储数组数据？
+
+使用多选 select 或 relation：
+
+```javascript
+// 简单标签
+{
+  "name": "tags",
+  "type": "select",
+  "options": {
+    "values": ["tag1", "tag2", "tag3"],
+    "maxSelect": null
+  }
+}
+
+// 复杂关联
+{
+  "name": "tags",
+  "type": "relation",
+  "options": {
+    "collectionId": "tags_id"
+  }
+}
+```
+
+### Q: relation 和 json 如何选择？
+
+- **relation**：需要关联查询、需要级联删除、数据需要独立管理
+- **json**：简单的嵌入式数据、不需要关联查询、数据结构灵活

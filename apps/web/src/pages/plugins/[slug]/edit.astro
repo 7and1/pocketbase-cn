@@ -1,0 +1,80 @@
+---
+export const prerender = false;
+
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import PluginSubmitForm from "@/components/plugins/PluginSubmitForm";
+import type { PluginEditData } from "@/components/plugins/PluginSubmitForm";
+import { POCKETBASE_URL } from "@/lib/constants/config";
+
+const { slug } = Astro.params;
+if (!slug) return Astro.redirect("/plugins");
+
+// Try to get the auth token from cookies
+const authCookie = Astro.cookies.get("pb_auth");
+let authToken = "";
+let userId = "";
+
+if (authCookie?.value) {
+  try {
+    const parsed = JSON.parse(authCookie.value);
+    authToken = parsed?.token || "";
+    userId = parsed?.model?.id || "";
+  } catch {
+    // Invalid cookie format
+  }
+}
+
+// If not authenticated, redirect to login
+if (!authToken || !userId) {
+  return Astro.redirect(`/auth/login?redirect=/plugins/${encodeURIComponent(slug)}/edit`);
+}
+
+// Fetch plugin data
+const res = await fetch(`${POCKETBASE_URL}/api/plugins/${encodeURIComponent(slug)}`, {
+  headers: {
+    Accept: "application/json",
+    Authorization: authToken,
+  },
+});
+
+if (!res.ok) {
+  return Astro.redirect("/plugins");
+}
+
+const json = await res.json();
+const plugin = json?.data;
+
+if (!plugin) {
+  return Astro.redirect("/plugins");
+}
+
+// Check if current user is the author
+const pluginAuthor = plugin?.author || plugin?.expand?.author?.id;
+if (pluginAuthor !== userId) {
+  // Not authorized to edit
+  return Astro.redirect(`/plugins/${slug}`);
+}
+
+// Prepare edit data
+const editData: PluginEditData = {
+  id: plugin.id,
+  slug: plugin.slug,
+  name: plugin.name,
+  description: plugin.description,
+  repository: plugin.repository || "",
+  homepage: plugin.homepage || "",
+  category: plugin.category || "utility",
+  tags: Array.isArray(plugin.tags) ? plugin.tags : [],
+  license: plugin.license || "MIT",
+};
+---
+
+<BaseLayout title={`Edit ${plugin?.name || slug} - PocketBase.cn`} description="Edit your plugin details.">
+  <h1 class="text-2xl font-semibold tracking-tight">Edit Plugin</h1>
+  <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+    Update your plugin information. Changes may need re-approval.
+  </p>
+  <div class="mt-6 max-w-3xl">
+    <PluginSubmitForm client:load mode="edit" initialData={editData} />
+  </div>
+</BaseLayout>

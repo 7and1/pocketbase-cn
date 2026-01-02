@@ -1,0 +1,318 @@
+---
+title: 生产环境部署清单
+description: PocketBase 生产环境部署的完整检查清单
+---
+
+本文档提供 PocketBase 生产环境部署的完整检查清单，确保您的应用安全、可靠地运行。
+
+## 部署前准备
+
+### 服务器配置
+
+- [ ] 选择合适的服务器配置（建议 2核4GB 起步）
+- [ ] 安装最新稳定的操作系统（Ubuntu 22.04 LTS 推荐）
+- [ ] 配置正确的时区（`timedatectl set-timezone Asia/Shanghai`）
+- [ ] 更新系统到最新版本（`apt update && apt upgrade`）
+- [ ] 配置主机名
+
+### 安全设置
+
+- [ ] 创建非 root 用户用于运行服务
+- [ ] 配置 SSH 密钥登录
+- [ ] 禁用 SSH 密码登录（可选）
+- [ ] 修改 SSH 默认端口（可选）
+- [ ] 安装并配置防火墙（ufw/firewalld）
+- [ ] 安装 fail2ban 防止暴力破解
+
+## PocketBase 配置
+
+### 基础配置
+
+- [ ] 下载并安装最新版本的 PocketBase
+- [ ] 设置强管理员密码
+- [ ] 配置加密密钥（`POCKETBASE_ENCRYPTION_KEY`）
+- [ ] 设置正确的数据目录权限
+- [ ] 配置日志级别
+
+### 集合与规则
+
+- [ ] 审查所有集合的 API 规则
+- [ ] 确保敏感数据使用 Protected 字段
+- [ ] 验证 Auth Collection 的规则配置
+- [ ] 检查关系字段的级联删除设置
+- [ ] 为查询字段添加索引
+
+### 邮件配置
+
+- [ ] 配置 SMTP 服务器
+- [ ] 设置正确的发件人信息
+- [ ] 测试邮件发送功能
+- [ ] 配置邮件模板（如需要）
+
+## SSL/HTTPS 配置
+
+### 证书安装
+
+- [ ] 安装 SSL 证书（Let's Encrypt 或商业证书）
+- [ ] 配置自动续期
+- [ ] 测试证书续期功能
+
+### 反向代理
+
+- [ ] 配置 Nginx/Caddy 反向代理
+- [ ] 启用 WebSocket 支持
+- [ ] 设置正确的安全头部
+  - [ ] Strict-Transport-Security
+  - [ ] X-Content-Type-Options
+  - [ ] X-Frame-Options
+  - [ ] X-XSS-Protection
+- [ ] 配置文件上传大小限制
+- [ ] 启用 Gzip 压缩
+
+### 示例 Nginx 配置检查
+
+```nginx
+# 确保包含以下配置
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection "upgrade";
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+```
+
+## 系统服务配置
+
+### Systemd 服务
+
+- [ ] 创建 systemd 服务文件
+- [ ] 配置自动重启
+- [ ] 设置资源限制
+- [ ] 配置日志轮转
+- [ ] 启用服务开机自启
+
+### 服务文件检查清单
+
+```ini
+[Service]
+Type=simple
+Restart=always
+RestartSec=5s
+ReadWritePaths=/opt/pocketbase/pb_data
+LimitNOFILE=65535
+MemoryLimit=512M
+```
+
+## 数据备份
+
+### 备份策略
+
+- [ ] 配置自动备份（每日）
+- [ ] 备份以下内容：
+  - [ ] `pb_data/data.db`
+  - [ ] `pb_data/storage/`
+- [ ] 设置备份保留策略（建议 30 天）
+- [ ] 配置异地备份（OSS/S3）
+- [ ] 测试备份恢复流程
+
+### 备份脚本检查
+
+```bash
+#!/bin/bash
+# 确保包含以下检查点
+
+# 1. 备份前服务状态检查
+# 2. 创建备份
+# 3. 上传到远程存储
+# 4. 清理旧备份
+# 5. 记录备份日志
+```
+
+## 监控告警
+
+### 服务监控
+
+- [ ] 配置服务健康检查
+- [ ] 设置服务异常告警
+- [ ] 配置响应时间监控
+- [ ] 设置错误率告警
+
+### 系统监控
+
+- [ ] 监控 CPU 使用率
+- [ ] 监控内存使用率
+- [ ] 监控磁盘空间（设置 80% 告警）
+- [ ] 监控网络流量
+- [ ] 监控数据库文件大小
+
+### 日志监控
+
+- [ ] 配置日志收集
+- [ ] 设置错误日志告警
+- [ ] 配置访问日志分析
+
+## CORS 配置
+
+- [ ] 设置正确的 CORS 来源白名单
+- [ ] 配置允许的 HTTP 方法
+- [ ] 配置允许的请求头
+- [ ] 设置凭据策略
+
+```bash
+# 启动参数示例
+./pocketbase serve --http.cor.origins=https://your-frontend.com,https://www.your-frontend.com
+```
+
+## 性能优化
+
+### 数据库优化
+
+- [ ] 启用 WAL 模式
+- [ ] 配置合适的缓存大小
+- [ ] 为常用查询字段添加索引
+- [ ] 定期执行 VACUUM
+
+### 网络优化
+
+- [ ] 启用 TCP BBR
+- [ ] 配置合适的 keepalive
+- [ ] 启用 HTTP/2
+
+### 应用优化
+
+- [ ] 使用 skipTotal 参数（适用场景）
+- [ ] 限制返回字段（fields 参数）
+- [ ] 配置合理的分页大小
+
+## 安全加固
+
+### 网络安全
+
+- [ ] 配置云服务商安全组
+- [ ] 关闭不必要的端口
+- [ ] 只开放 80、443 端口到公网
+- [ ] 限制 SSH 访问 IP（如可能）
+
+### 应用安全
+
+- [ ] 启用请求限流
+- [ ] 配置最大请求体大小
+- [ ] 定期更新 PocketBase 版本
+- [ ] 审查并删除测试数据
+- [ ] 移除示例集合
+
+### 数据安全
+
+- [ ] 确保敏感字段使用 Protected 类型
+- [ ] 配置 API 规则遵循最小权限原则
+- [ ] 启用邮箱验证（如需要）
+- [ ] 定期审查用户权限
+
+## OAuth 配置
+
+- [ ] 配置 OAuth 提供商
+- [ ] 设置正确的回调 URL
+- [ ] 测试 OAuth 登录流程
+- [ ] 配置用户自动创建规则
+
+## 测试验证
+
+### 功能测试
+
+- [ ] 测试用户注册/登录
+- [ ] 测试 OAuth 登录
+- [ ] 测试文件上传/下载
+- [ ] 测试实时订阅
+- [ ] 测试所有自定义 API 端点
+
+### 性能测试
+
+- [ ] 执行压力测试
+- [ ] 检查响应时间
+- [ ] 验证并发处理能力
+
+### 安全测试
+
+- [ ] 测试未授权访问
+- [ ] 测试 SQL 注入防护
+- [ ] 测试 XSS 防护
+- [ ] 验证 CORS 配置
+
+## 文档与运维
+
+### 文档
+
+- [ ] 记录部署流程
+- [ ] 记录配置文件位置
+- [ ] 记录备份恢复流程
+- [ ] 记录常见问题处理
+
+### 运维流程
+
+- [ ] 制定更新流程
+- [ ] 制定应急响应流程
+- [ ] 配置变更记录
+- [ ] 值班联系方式
+
+## 上线前最终检查
+
+### 配置确认
+
+- [ ] 确认管理员密码强度
+- [ ] 确认所有密钥/Token 安全存储
+- [ ] 确认 CORS 配置正确
+- [ ] 确认 HTTPS 正常工作
+- [ ] 确认备份正常运行
+
+### 服务确认
+
+- [ ] 服务开机自启
+- [ ] 防火墙规则正确
+- [ ] 监控告警正常
+- [ ] 日志正常记录
+
+### 域名与 DNS
+
+- [ ] 域名解析正确
+- [ ] CDN 配置（如使用）
+- [ ] DNSSEC 启用（推荐）
+
+## 上线后
+
+### 监控观察
+
+- [ ] 观察服务日志
+- [ ] 监控错误率
+- [ ] 监控响应时间
+- [ ] 监控资源使用
+
+### 持续优化
+
+- [ ] 分析慢查询
+- [ ] 优化 API 规则
+- [ ] 调整资源配置
+- [ ] 更新文档
+
+---
+
+## 快速检查命令
+
+```bash
+# 服务状态
+systemctl status pocketbase
+
+# 端口监听
+ss -tlnp | grep 8090
+
+# 磁盘空间
+df -h
+
+# 内存使用
+free -h
+
+# 最新日志
+journalctl -u pocketbase -n 50
+
+# SSL 证书到期
+echo | openssl s_client -servername your-domain.com -connect your-domain.com:443 2>/dev/null | openssl x509 -noout -dates
+```

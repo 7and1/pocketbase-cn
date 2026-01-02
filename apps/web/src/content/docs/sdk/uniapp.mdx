@@ -1,0 +1,1066 @@
+---
+title: UniApp 集成
+description: 在 UniApp 项目中集成 PocketBase JS SDK，支持 H5、小程序、App
+---
+
+UniApp 是一个使用 Vue.js 开发所有前端应用的框架，可以编译到 iOS、Android、H5、小程序等多个平台。本文介绍如何在 UniApp 中集成 PocketBase。
+
+## 安装
+
+```bash
+npm install pocketbase
+# 或
+yarn add pocketbase
+```
+
+## 基础配置
+
+### 创建 PocketBase 实例
+
+创建 `utils/pocketbase.js`：
+
+```javascript
+// utils/pocketbase.js
+import PocketBase from "pocketbase";
+
+// 开发环境使用 localhost，生产环境使用真实地址
+const PB_URL =
+  process.env.NODE_ENV === "development"
+    ? "http://192.168.1.100:8090" // 开发时使用局域网 IP
+    : "https://api.yourapp.com";
+
+export const pb = new PocketBase(PB_URL);
+
+// 自定义存储适配器（适配 UniApp）
+class UniStorage {
+  get(key) {
+    const data = uni.getStorageSync(key);
+    return data ? JSON.parse(data) : null;
+  }
+
+  set(key, value) {
+    uni.setStorageSync(key, JSON.stringify(value));
+  }
+
+  remove(key) {
+    uni.removeStorageSync(key);
+  }
+
+  clear() {
+    uni.clearStorageSync();
+  }
+}
+
+// 替换默认存储
+pb.authStore.storage = new UniStorage();
+
+// 恢复登录状态
+const stored = pb.authStore.storage.get("pb_auth");
+if (stored) {
+  pb.authStore.save(stored.token, stored.model);
+}
+
+// 监听登录状态变化，保存到存储
+pb.authStore.onChange((token, model) => {
+  pb.authStore.storage.set("pb_auth", { token, model });
+});
+
+export default pb;
+```
+
+### 环境配置
+
+`config/pocketbase.config.js`:
+
+```javascript
+export default {
+  // 开发环境
+  development: "http://192.168.1.100:8090",
+
+  // 生产环境
+  production: "https://api.yourapp.com",
+
+  // 获取当前环境 URL
+  getUrl() {
+    return process.env.NODE_ENV === "development"
+      ? this.development
+      : this.production;
+  },
+};
+```
+
+## 请求拦截器
+
+### 封装请求
+
+```javascript
+// utils/request.js
+import { pb } from "./pocketbase";
+
+// 请求拦截器
+export function request(config) {
+  return new Promise((resolve, reject) => {
+    uni.request({
+      url: `${pb.baseUrl}${config.url}`,
+      method: config.method || "GET",
+      data: config.data,
+      header: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${pb.authStore.token}`,
+        ...config.header,
+      },
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(res.data);
+        } else {
+          reject({
+            statusCode: res.statusCode,
+            message: res.data?.message || "Request failed",
+          });
+        }
+      },
+      fail: (err) => {
+        reject(err);
+      },
+    });
+  });
+}
+
+// 文件上传
+export function uploadFile(url, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const uploadTask = uni.uploadFile({
+      url: `${pb.baseUrl}${url}`,
+      filePath: file.path,
+      name: file.name || "file",
+      header: {
+        Authorization: `Bearer ${pb.authStore.token}`,
+      },
+      success: (res) => {
+        if (res.statusCode === 200) {
+          resolve(JSON.parse(res.data));
+        } else {
+          reject(new Error("Upload failed"));
+        }
+      },
+      fail: reject,
+    });
+
+    if (onProgress) {
+      uploadTask.onProgressUpdate((res) => {
+        onProgress(res.progress);
+      });
+    }
+  });
+}
+```
+
+## Composables 封装
+
+### useAuth Composable
+
+```javascript
+// composables/useAuth.js
+import { ref, computed } from "vue";
+import { pb } from "@/utils/pocketbase";
+
+export function useAuth() {
+  const loading = ref(false);
+  const error = ref(null);
+
+  // 认证状态
+  const isAuthenticated = computed(() => pb.authStore.isValid);
+  const user = computed(() => pb.authStore.model);
+
+  // 登录
+  async function login(email, password) {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      const authData = await pb
+        .collection("users")
+        .authWithPassword(email, password);
+      return authData;
+    } catch (err) {
+      error.value = err.message;
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  // 注册
+  async function register(data) {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      const record = await pb.collection("users").create(data);
+      return record;
+    } catch (err) {
+      error.value = err.message;
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  // OAuth 登录
+  async function loginWithOAuth(provider) {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      const authData = await pb.collection("users").authWithOAuth2({
+        provider,
+        urlCallback: (url) => {
+          // 在小程序中打开网页
+          // #ifdef MP-WEIXIN
+          wx.navigateTo({
+            url: `/pages/webview/index?url=${encodeURIComponent(url)}`,
+          });
+          // #endif
+
+          // 在 H5 中打开新窗口
+          // #ifdef H5
+          window.open(url, "_blank");
+          // #endif
+
+          // 在 App 中打开
+          // #ifdef APP-PLUS
+          plus.runtime.openURL(url);
+          // #endif
+        },
+      });
+      return authData;
+    } catch (err) {
+      error.value = err.message;
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  // 登出
+  function logout() {
+    pb.authStore.clear();
+    uni.reLaunch({
+      url: "/pages/login/index",
+    });
+  }
+
+  // 刷新 Token
+  async function refresh() {
+    try {
+      await pb.collection("users").authRefresh();
+    } catch (err) {
+      logout();
+      throw err;
+    }
+  }
+
+  return {
+    loading,
+    error,
+    isAuthenticated,
+    user,
+    login,
+    register,
+    loginWithOAuth,
+    logout,
+    refresh,
+  };
+}
+```
+
+### useCollection Composable
+
+```javascript
+// composables/useCollection.js
+import { ref, onMounted, onUnmounted } from "vue";
+import { pb } from "@/utils/pocketbase";
+
+export function useCollection(collectionName, options = {}) {
+  const items = ref([]);
+  const loading = ref(false);
+  const error = ref(null);
+  const totalItems = ref(0);
+  let subscription = null;
+
+  // 获取列表
+  async function getList(page = 1, perPage = 20, filter = "", sort = "") {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      const result = await pb
+        .collection(collectionName)
+        .getList(page, perPage, {
+          filter,
+          sort,
+          expand: options.expand || "",
+        });
+      items.value = result.items;
+      totalItems.value = result.totalItems;
+      return result;
+    } catch (err) {
+      error.value = err.message;
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  // 获取单条
+  async function getOne(id) {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      const record = await pb.collection(collectionName).getOne(id, {
+        expand: options.expand || "",
+      });
+      return record;
+    } catch (err) {
+      error.value = err.message;
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  // 创建
+  async function create(data) {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      const record = await pb.collection(collectionName).create(data);
+      items.value.unshift(record);
+      return record;
+    } catch (err) {
+      error.value = err.message;
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  // 更新
+  async function update(id, data) {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      const record = await pb.collection(collectionName).update(id, data);
+      const index = items.value.findIndex((item) => item.id === id);
+      if (index !== -1) {
+        items.value[index] = record;
+      }
+      return record;
+    } catch (err) {
+      error.value = err.message;
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  // 删除
+  async function remove(id) {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      await pb.collection(collectionName).delete(id);
+      items.value = items.value.filter((item) => item.id !== id);
+    } catch (err) {
+      error.value = err.message;
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  // 实时订阅（仅 H5）
+  function subscribe(callback) {
+    // #ifdef H5
+    subscription = pb.collection(collectionName).subscribe("*", (e) => {
+      callback(e);
+      switch (e.action) {
+        case "create":
+          items.value.unshift(e.record);
+          break;
+        case "update":
+          const idx = items.value.findIndex((r) => r.id === e.record.id);
+          if (idx !== -1) items.value[idx] = e.record;
+          break;
+        case "delete":
+          items.value = items.value.filter((r) => r.id !== e.record.id);
+          break;
+      }
+    });
+    // #endif
+  }
+
+  // 取消订阅
+  function unsubscribe() {
+    // #ifdef H5
+    subscription?.unsubscribe();
+    // #endif
+
+    // 小程序和 App 使用轮询替代
+    if (options.pollInterval) {
+      clearInterval(pollTimer);
+    }
+  }
+
+  // 轮询（小程序和 App）
+  let pollTimer = null;
+  function startPoll(interval = 5000) {
+    // #ifndef H5
+    pollTimer = setInterval(async () => {
+      const lastItem = items.value[0];
+      const result = await pb.collection(collectionName).getList(1, 1);
+      if (result.items[0]?.id !== lastItem?.id) {
+        await getList();
+      }
+    }, interval);
+    // #endif
+  }
+
+  onUnmounted(() => {
+    unsubscribe();
+  });
+
+  return {
+    items,
+    loading,
+    error,
+    totalItems,
+    getList,
+    getOne,
+    create,
+    update,
+    remove,
+    subscribe,
+    unsubscribe,
+    startPoll,
+  };
+}
+```
+
+## 页面示例
+
+### 登录页面
+
+```vue
+<!-- pages/login/index.vue -->
+<template>
+  <view class="login-page">
+    <view class="logo">
+      <image src="/static/logo.png" mode="aspectFit" />
+    </view>
+
+    <view class="form">
+      <view class="form-item">
+        <uni-easyinput
+          v-model="email"
+          placeholder="请输入邮箱"
+          type="email"
+          prefix-icon="email"
+        />
+      </view>
+
+      <view class="form-item">
+        <uni-easyinput
+          v-model="password"
+          placeholder="请输入密码"
+          type="password"
+          prefix-icon="locked"
+        />
+      </view>
+
+      <button @click="handleLogin" :loading="loading" class="login-btn">
+        登录
+      </button>
+
+      <view class="links">
+        <text @click="goToRegister">还没有账号？去注册</text>
+      </view>
+
+      <!-- 第三方登录 -->
+      <view class="oauth-login">
+        <view class="title">其他登录方式</view>
+        <view class="oauth-buttons">
+          <!-- 微信小程序登录 -->
+          <!-- #ifdef MP-WEIXIN -->
+          <button open-type="getUserInfo" @getuserinfo="handleWechatLogin">
+            <uni-icons type="weixin" size="24" />
+          </button>
+          <!-- #endif -->
+
+          <!-- 微信 App 登录 -->
+          <!-- #ifdef APP-PLUS -->
+          <button @click="handleWechatLogin">
+            <uni-icons type="weixin" size="24" />
+          </button>
+          <!-- #endif -->
+        </view>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup>
+import { ref } from "vue";
+import { useAuth } from "@/composables/useAuth";
+
+const email = ref("");
+const password = ref("");
+const { loading, login } = useAuth();
+
+async function handleLogin() {
+  try {
+    await login(email.value, password.value);
+    uni.showToast({ title: "登录成功", icon: "success" });
+    uni.switchTab({ url: "/pages/index/index" });
+  } catch (err) {
+    uni.showToast({ title: err.message || "登录失败", icon: "none" });
+  }
+}
+
+function goToRegister() {
+  uni.navigateTo({ url: "/pages/register/index" });
+}
+
+async function handleWechatLogin(e) {
+  // #ifdef MP-WEIXIN
+  const { userInfo } = e.detail;
+  // 获取微信 code 并发送到后端
+  wx.login({
+    success: async (res) => {
+      // 使用 code 登录
+      try {
+        await pb.collection("users").authWithOAuth2({
+          provider: "wechat",
+          createData: {
+            nickname: userInfo.nickName,
+            avatar: userInfo.avatarUrl,
+          },
+        });
+        uni.switchTab({ url: "/pages/index/index" });
+      } catch (err) {
+        uni.showToast({ title: "登录失败", icon: "none" });
+      }
+    },
+  });
+  // #endif
+}
+</script>
+
+<style scoped>
+.login-page {
+  padding: 40rpx;
+}
+
+.logo {
+  text-align: center;
+  margin-top: 100rpx;
+  margin-bottom: 60rpx;
+}
+
+.logo image {
+  width: 200rpx;
+  height: 200rpx;
+}
+
+.form-item {
+  margin-bottom: 30rpx;
+}
+
+.login-btn {
+  width: 100%;
+  margin-top: 40rpx;
+  background-color: #007aff;
+  color: white;
+}
+
+.links {
+  text-align: center;
+  margin-top: 30rpx;
+  color: #999;
+}
+
+.oauth-login {
+  margin-top: 80rpx;
+}
+
+.oauth-login .title {
+  text-align: center;
+  color: #999;
+  margin-bottom: 30rpx;
+}
+
+.oauth-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 40rpx;
+}
+</style>
+```
+
+### 列表页面
+
+```vue
+<!-- pages/posts/index.vue -->
+<template>
+  <view class="posts-page">
+    <!-- 下拉刷新 -->
+    <scroll-view
+      scroll-y
+      class="scroll-container"
+      refresher-enabled
+      :refresher-triggered="refreshing"
+      @refresherrefresh="onRefresh"
+      @scrolltolower="loadMore"
+    >
+      <view class="post-list">
+        <view
+          v-for="post in items"
+          :key="post.id"
+          class="post-item"
+          @click="goToDetail(post.id)"
+        >
+          <image
+            v-if="post.cover"
+            :src="getFileUrl(post, post.cover)"
+            mode="aspectFill"
+          />
+          <view class="post-content">
+            <text class="post-title">{{ post.title }}</text>
+            <text class="post-excerpt">{{ post.excerpt }}</text>
+            <view class="post-meta">
+              <text>{{ formatDate(post.created) }}</text>
+              <text>{{ post.views }} 阅读</text>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <!-- 加载更多 -->
+      <view class="load-more">
+        <uni-load-more :status="loadMoreStatus" />
+      </view>
+    </scroll-view>
+  </view>
+</template>
+
+<script setup>
+import { ref, computed } from "vue";
+import { pb } from "@/utils/pocketbase";
+import { useCollection } from "@/composables/useCollection";
+
+const { items, loading, totalItems, getList, startPoll } = useCollection(
+  "posts",
+  {
+    expand: "author",
+  },
+);
+
+const refreshing = ref(false);
+const page = ref(1);
+const perPage = 20;
+
+const loadMoreStatus = computed(() => {
+  if (loading.value) return "loading";
+  if (items.value.length >= totalItems.value) return "noMore";
+  return "more";
+});
+
+async function fetchData() {
+  await getList(page.value, perPage, "status='published'", "-created");
+}
+
+// 刷新
+async function onRefresh() {
+  refreshing.value = true;
+  page.value = 1;
+  await fetchData();
+  refreshing.value = false;
+}
+
+// 加载更多
+async function loadMore() {
+  if (loading.value || items.value.length >= totalItems.value) return;
+  page.value++;
+  await getList(page.value, perPage, "status='published'", "-created");
+}
+
+// 获取文件 URL
+function getFileUrl(record, filename) {
+  return pb.files.getUrl(record, filename);
+}
+
+// 格式化日期
+function formatDate(dateStr) {
+  const date = new Date(dateStr);
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+// 跳转详情
+function goToDetail(id) {
+  uni.navigateTo({ url: `/pages/post-detail/index?id=${id}` });
+}
+
+// 初始化
+fetchData();
+
+// 小程序和 App 启动轮询
+// #ifndef H5
+startPoll(5000);
+// #endif
+</script>
+
+<style scoped>
+.posts-page {
+  height: 100vh;
+}
+
+.scroll-container {
+  height: 100%;
+}
+
+.post-item {
+  display: flex;
+  padding: 20rpx;
+  border-bottom: 1rpx solid #eee;
+}
+
+.post-item image {
+  width: 200rpx;
+  height: 150rpx;
+  border-radius: 10rpx;
+  margin-right: 20rpx;
+}
+
+.post-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.post-title {
+  font-size: 32rpx;
+  font-weight: bold;
+  margin-bottom: 10rpx;
+}
+
+.post-excerpt {
+  font-size: 26rpx;
+  color: #666;
+  flex: 1;
+}
+
+.post-meta {
+  display: flex;
+  gap: 20rpx;
+  font-size: 24rpx;
+  color: #999;
+}
+
+.load-more {
+  padding: 20rpx;
+}
+</style>
+```
+
+### 文件上传
+
+```vue
+<!-- components/ImageUpload.vue -->
+<template>
+  <view class="image-upload">
+    <view class="image-list">
+      <view v-for="(img, index) in images" :key="index" class="image-item">
+        <image :src="img.url" mode="aspectFill" />
+        <view class="delete-btn" @click="removeImage(index)">
+          <uni-icons type="close" color="white" size="16" />
+        </view>
+      </view>
+
+      <view
+        v-if="images.length < maxCount"
+        class="upload-btn"
+        @click="chooseImage"
+      >
+        <uni-icons type="plus" size="40" color="#999" />
+        <text>上传图片</text>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup>
+import { ref } from "vue";
+import { pb } from "@/utils/pocketbase";
+
+const props = defineProps({
+  modelValue: {
+    type: Array,
+    default: () => [],
+  },
+  maxCount: {
+    type: Number,
+    default: 9,
+  },
+  maxSize: {
+    type: Number,
+    default: 5 * 1024 * 1024, // 5MB
+  },
+});
+
+const emit = defineEmits(["update:modelValue"]);
+
+const images = ref([]);
+const uploading = ref(false);
+
+function chooseImage() {
+  const chooseMethod = props.maxCount === 1 ? "chooseImage" : "chooseImage";
+
+  uni.chooseImage({
+    count: props.maxCount - images.value.length,
+    sizeType: ["compressed"],
+    sourceType: ["album", "camera"],
+    success: (res) => {
+      handleFiles(res.tempFilePaths);
+    },
+  });
+}
+
+async function handleFiles(filePaths) {
+  for (const filePath of filePaths) {
+    try {
+      uploading.value = true;
+
+      // 先获取文件信息检查大小
+      const fileInfo = await getFileInfo(filePath);
+
+      if (fileInfo.size > props.maxSize) {
+        uni.showToast({ title: "图片太大", icon: "none" });
+        continue;
+      }
+
+      // 上传
+      const record = await uploadFile(filePath);
+      images.value.push({
+        url: filePath,
+        recordId: record.id,
+        filename: record.file,
+      });
+    } catch (err) {
+      uni.showToast({ title: "上传失败", icon: "none" });
+    } finally {
+      uploading.value = false;
+    }
+  }
+
+  emitChange();
+}
+
+function getFileInfo(filePath) {
+  return new Promise((resolve) => {
+    uni.getFileInfo({
+      filePath,
+      success: resolve,
+    });
+  });
+}
+
+function uploadFile(filePath) {
+  return new Promise((resolve, reject) => {
+    const uploadTask = uni.uploadFile({
+      url: `${pb.baseUrl}/api/collections/uploads/records`,
+      filePath,
+      name: "file",
+      header: {
+        Authorization: `Bearer ${pb.authStore.token}`,
+      },
+      success: (res) => {
+        if (res.statusCode === 200) {
+          resolve(JSON.parse(res.data));
+        } else {
+          reject(new Error("Upload failed"));
+        }
+      },
+      fail: reject,
+    });
+  });
+}
+
+function removeImage(index) {
+  images.value.splice(index, 1);
+  emitChange();
+}
+
+function emitChange() {
+  emit("update:modelValue", images.value);
+}
+</script>
+
+<style scoped>
+.image-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+
+.image-item,
+.upload-btn {
+  width: 200rpx;
+  height: 200rpx;
+  position: relative;
+}
+
+.image-item image {
+  width: 100%;
+  height: 100%;
+  border-radius: 10rpx;
+}
+
+.delete-btn {
+  position: absolute;
+  top: -10rpx;
+  right: -10rpx;
+  width: 40rpx;
+  height: 40rpx;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.upload-btn {
+  border: 2rpx dashed #ddd;
+  border-radius: 10rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+</style>
+```
+
+## 平台特定配置
+
+### 微信小程序
+
+```javascript
+// 微信小程序登录
+async function wechatMiniLogin() {
+  // 1. 获取 code
+  const { code } = await uni.login({ provider: "weixin" });
+
+  // 2. 发送到后端换取 session
+  const result = await pb.send("/api/wechat-login", {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  });
+
+  // 3. 保存用户信息
+  if (result.token) {
+    pb.authStore.save(result.token, result.user);
+  }
+}
+```
+
+### App 端 OAuth
+
+```javascript
+// App 端微信登录
+function appWechatLogin() {
+  // #ifdef APP-PLUS
+  plus.oauth.getServices((services) => {
+    const wechat = services.find((s) => s.id === "weixin");
+    wechat.login((e) => {
+      // 获取用户信息
+      wechat.getUserInfo((user) => {
+        // 发送到后端处理
+        pb.collection("users").authWithOAuth2({
+          provider: "weixin",
+          createData: {
+            nickname: user.nickname,
+            headimgurl: user.headimgurl,
+          },
+        });
+      });
+    });
+  });
+  // #endif
+}
+```
+
+## 常见问题
+
+### Q: 小程序 WebSocket 不支持怎么办？
+
+使用轮询替代实时订阅：
+
+```javascript
+function usePolling(collection, filter, callback, interval = 5000) {
+  let lastId = null;
+
+  async function poll() {
+    const result = await pb.collection(collection).getList(1, 10, {
+      filter,
+    });
+
+    if (result.items[0]?.id !== lastId) {
+      callback(result.items);
+      lastId = result.items[0]?.id;
+    }
+  }
+
+  const timer = setInterval(poll, interval);
+
+  return () => clearInterval(timer);
+}
+```
+
+### Q: 如何处理跨域问题？
+
+开发时配置代理：
+
+```javascript
+// vite.config.js 或 vue.config.js
+export default {
+  server: {
+    proxy: {
+      "/api": {
+        target: "http://192.168.1.100:8090",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, "/api"),
+      },
+    },
+  },
+};
+```
+
+### Q: 本地存储 Token 丢失？
+
+使用自定义存储适配器，确保 Token 持久化：
+
+```javascript
+class UniStorage {
+  get(key) {
+    return uni.getStorageSync(key);
+  }
+  set(key, value) {
+    uni.setStorageSync(key, value);
+  }
+}
+
+pb.authStore.storage = new UniStorage();
+```

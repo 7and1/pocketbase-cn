@@ -1,0 +1,86 @@
+---
+title: 自定义 Routes（P2）
+description: 通过 routerAdd 实现自定义 API；以及鉴权、CORS、限流与错误码规范。
+---
+
+本页对应 SEO 计划中的 **P2：Custom Routes**。在 PocketBase 里，自定义 Routes 通常用于「Records API 做不到/做起来不方便」的接口。
+
+## 什么时候需要自定义 Routes
+
+Records API 很强，但以下场景更适合自定义：
+
+- **聚合/榜单**：例如插件趋势（weekly downloads）、精选列表
+- **组合查询**：跨集合 join（插件 + stats + versions）
+- **BFF 结构**：前端需要一次请求拿到组合结构，而不是多次调用 records
+- **对外稳定协议**：避免前端强依赖 PB 记录结构
+
+## 基本 API 形态（推荐）
+
+### 1) 只读列表（分页）
+
+建议统一支持：
+
+- `limit`：页大小（上限保护）
+- `offset`：偏移分页（简单易用）
+- `meta.hasMore / meta.nextOffset`
+
+本项目已在：
+
+- `GET /api/plugins/list`
+- `GET /api/showcase/list`
+
+实现了以上分页模式（见 `apps/backend/pb_hooks/30_plugins.pb.js`、`apps/backend/pb_hooks/40_showcase.pb.js`）。
+
+### 2) 详情页（带统计/副作用）
+
+例如插件详情：`GET /api/plugins/{slug}`
+
+- 组合返回：插件字段 + `plugin_stats` + 最近版本列表
+- 可选副作用：增加 view 计数（但必须限流）
+
+### 3) 需要登录的写入接口
+
+用 `$apis.requireAuth()` 收口：
+
+```js
+routerAdd(
+  "POST",
+  "/api/plugins/{slug}/star",
+  function (c) {
+    if (!c.auth)
+      return c.json(401, {
+        error: { code: "UNAUTHORIZED", message: "Authentication required" },
+      });
+    return c.json(200, { data: { starred: true } });
+  },
+  $apis.requireAuth(),
+);
+```
+
+## 参数读取方式（PocketBase JSVM）
+
+- path 参数：`c.request.pathValue("slug")`（路由写法：`/api/plugins/{slug}`）
+- query/body/header：`c.requestInfo()` → `info.query` / `info.body` / `info.headers`
+
+## 错误结构与状态码（建议）
+
+建议对外统一：
+
+```json
+{ "error": { "code": "SOME_CODE", "message": "Human readable message" } }
+```
+
+常用状态码：
+
+- `400`：参数不合法
+- `401`：未登录
+- `403`：权限不足
+- `404`：资源不存在
+- `429`：限流
+- `500`：内部错误（尽量不要暴露细节）
+
+## 安全与性能要点
+
+- **限流默认开启**：尤其是写入接口、下载计数、view 计数、newsletter 订阅
+- **对外请求必须超时**：GitHub/邮件 API 一定要设置 timeout
+- **CORS 收紧**：只允许站点域名（`PB_CORS_ORIGINS`）

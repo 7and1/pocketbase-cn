@@ -1,0 +1,793 @@
+---
+title: 微信登录集成
+description: PocketBase 微信公众号和小程序登录完整配置教程
+---
+
+import {
+  Steps,
+  Aside,
+  Tabs,
+  TabItem,
+  Code,
+} from "@astrojs/starlight/components";
+
+微信登录是国内应用最常用的第三方登录方式。本文详细介绍如何在 PocketBase 中集成微信公众号网页授权登录和微信小程序登录。
+
+## 微信登录概述
+
+### 微信登录类型
+
+微信提供多种登录方式，适用于不同场景：
+
+| 登录类型             | 适用场景        | 需要的账号       |
+| -------------------- | --------------- | ---------------- |
+| 微信公众号网页授权   | 微信内 H5 页面  | 服务号（已认证） |
+| 微信开放平台网站应用 | PC 网站扫码登录 | 开放平台应用     |
+| 微信小程序登录       | 微信小程序      | 小程序账号       |
+| 微信开放平台移动应用 | iOS/Android App | 开放平台应用     |
+
+### 账号准备
+
+在开始之前，您需要：
+
+- **微信公众平台账号**：用于公众号网页授权
+  - 必须是已认证的服务号（订阅号不支持网页授权）
+  - 认证费用：300 元/年
+
+- **微信开放平台账号**：用于网站扫码登录
+  - 需要企业资质
+  - 认证费用：300 元/年
+
+- **微信小程序账号**：用于小程序登录
+  - 可以是个人或企业主体
+
+<Aside type="caution">
+  微信的各种登录方式需要不同的账号和认证。请根据您的业务需求选择合适的方式。
+</Aside>
+
+## 微信公众号网页授权
+
+适用于在微信内打开的 H5 页面，用户点击授权即可登录。
+
+### 配置公众号
+
+<Steps>
+
+1. **登录微信公众平台**
+
+   访问 [微信公众平台](https://mp.weixin.qq.com/)，使用管理员账号登录。
+
+2. **获取 AppID 和 AppSecret**
+
+   进入「开发」->「基本配置」：
+   - 记录 AppID（开发者 ID）
+   - 生成并记录 AppSecret（开发者密码）
+
+   <Aside type="danger">
+     AppSecret 非常重要，请妥善保管。如果泄露，需要立即重置。
+   </Aside>
+
+3. **配置网页授权域名**
+
+   进入「设置与开发」->「公众号设置」->「功能设置」：
+   - 点击「网页授权域名」的「设置」
+   - 添加您的域名（如 `your-domain.com`）
+   - 下载验证文件，放置到域名根目录
+
+4. **配置 IP 白名单**
+
+   进入「开发」->「基本配置」->「IP白名单」：
+   - 添加您服务器的公网 IP
+
+</Steps>
+
+### PocketBase 配置
+
+由于微信公众号授权有特殊的域名要求，我们需要使用 PocketBase 的 OIDC 自定义配置：
+
+<Steps>
+
+1. **登录 PocketBase 管理后台**
+
+   访问 `https://your-domain.com/_/`
+
+2. **配置 OIDC 提供商**
+
+   Settings -> Auth providers -> OIDC：
+
+   | 配置项        | 值                                                    |
+   | ------------- | ----------------------------------------------------- |
+   | Name          | `wechat`                                              |
+   | Client ID     | 公众号 AppID                                          |
+   | Client Secret | 公众号 AppSecret                                      |
+   | Auth URL      | `https://open.weixin.qq.com/connect/oauth2/authorize` |
+   | Token URL     | `https://api.weixin.qq.com/sns/oauth2/access_token`   |
+   | User API URL  | `https://api.weixin.qq.com/sns/userinfo`              |
+   | Scopes        | `snsapi_userinfo`                                     |
+
+3. **保存配置**
+
+</Steps>
+
+<Aside type="tip">
+  微信授权的 scope 有两种： - `snsapi_base`：静默授权，只能获取 openid -
+  `snsapi_userinfo`：需要用户确认，可获取昵称、头像等
+</Aside>
+
+### 前端集成（微信内 H5）
+
+```javascript
+import PocketBase from "pocketbase";
+
+const pb = new PocketBase("https://your-domain.com");
+
+// 检测是否在微信内
+function isWechat() {
+  return /micromessenger/i.test(navigator.userAgent);
+}
+
+// 微信授权登录
+async function loginWithWechat() {
+  if (!isWechat()) {
+    alert("请在微信内打开");
+    return;
+  }
+
+  try {
+    // 发起 OAuth2 登录
+    const authData = await pb.collection("users").authWithOAuth2({
+      provider: "wechat",
+      urlCallback: (url) => {
+        // 微信内直接跳转
+        window.location.href = url;
+      },
+    });
+
+    console.log("登录成功:", authData.meta);
+  } catch (error) {
+    console.error("登录失败:", error);
+  }
+}
+```
+
+### 自定义微信授权流程
+
+由于微信授权有一些特殊要求，您可能需要自己处理授权流程：
+
+```javascript
+// 1. 生成授权 URL
+const APPID = "your-appid";
+const REDIRECT_URI = encodeURIComponent(
+  "https://your-domain.com/wechat-callback",
+);
+const SCOPE = "snsapi_userinfo";
+const STATE = Math.random().toString(36).substring(7);
+
+const authUrl = `https://open.weixin.qq.com/connect/oauth2/authorize?appid=${APPID}&redirect_uri=${REDIRECT_URI}&response_type=code&scope=${SCOPE}&state=${STATE}#wechat_redirect`;
+
+// 2. 跳转到授权页面
+window.location.href = authUrl;
+
+// 3. 在回调页面处理授权码
+// https://your-domain.com/wechat-callback?code=xxx&state=xxx
+const urlParams = new URLSearchParams(window.location.search);
+const code = urlParams.get("code");
+
+if (code) {
+  // 将 code 发送到后端换取用户信息
+  const response = await fetch("/api/wechat-login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+
+  const data = await response.json();
+  // 使用返回的 token 登录 PocketBase
+  pb.authStore.save(data.token, data.record);
+}
+```
+
+### 服务端处理（使用 PocketBase Hooks）
+
+```javascript
+// pb_hooks/wechat_auth.pb.js
+/// <reference path="../pb_data/types.d.ts" />
+
+routerAdd("POST", "/api/wechat-login", (c) => {
+  const data = $apis.requestInfo(c).data;
+  const code = data.code;
+
+  if (!code) {
+    throw new BadRequestError("缺少授权码");
+  }
+
+  const APPID = $os.getenv("WECHAT_APPID");
+  const SECRET = $os.getenv("WECHAT_SECRET");
+
+  // 1. 用 code 换取 access_token
+  const tokenRes = $http.send({
+    url: `https://api.weixin.qq.com/sns/oauth2/access_token?appid=${APPID}&secret=${SECRET}&code=${code}&grant_type=authorization_code`,
+    method: "GET",
+  });
+
+  const tokenData = JSON.parse(tokenRes.raw);
+
+  if (tokenData.errcode) {
+    throw new BadRequestError("获取 access_token 失败: " + tokenData.errmsg);
+  }
+
+  const { access_token, openid } = tokenData;
+
+  // 2. 获取用户信息
+  const userRes = $http.send({
+    url: `https://api.weixin.qq.com/sns/userinfo?access_token=${access_token}&openid=${openid}&lang=zh_CN`,
+    method: "GET",
+  });
+
+  const userInfo = JSON.parse(userRes.raw);
+
+  // 3. 查找或创建用户
+  const usersCollection = $app.dao().findCollectionByNameOrId("users");
+  let user;
+
+  try {
+    user = $app.dao().findFirstRecordByData("users", "wechat_openid", openid);
+  } catch (e) {
+    // 用户不存在，创建新用户
+    user = new Record(usersCollection, {
+      wechat_openid: openid,
+      name: userInfo.nickname,
+      avatar: userInfo.headimgurl,
+    });
+    $app.dao().saveRecord(user);
+  }
+
+  // 4. 生成认证 token
+  const token = $tokens.recordAuthToken($app, user);
+
+  return c.json(200, {
+    token: token,
+    record: user,
+  });
+});
+```
+
+## 微信开放平台网站应用
+
+适用于 PC 网站的扫码登录。
+
+### 创建网站应用
+
+<Steps>
+
+1. **注册微信开放平台**
+
+   访问 [微信开放平台](https://open.weixin.qq.com/)，完成企业认证。
+
+2. **创建网站应用**
+
+   进入「管理中心」->「网站应用」->「创建网站应用」：
+
+   | 字段       | 说明              |
+   | ---------- | ----------------- |
+   | 应用名称   | 您的网站名称      |
+   | 应用官网   | 网站首页 URL      |
+   | 授权回调域 | `your-domain.com` |
+
+3. **等待审核**
+
+   提交后等待微信审核，通常 1-3 个工作日。
+
+4. **获取凭证**
+
+   审核通过后，获取 AppID 和 AppSecret。
+
+</Steps>
+
+### PocketBase 配置
+
+微信开放平台网站应用使用标准的 OAuth2 流程：
+
+| 配置项        | 值                                                  |
+| ------------- | --------------------------------------------------- |
+| Name          | `wechat_open`                                       |
+| Client ID     | 开放平台 AppID                                      |
+| Client Secret | 开放平台 AppSecret                                  |
+| Auth URL      | `https://open.weixin.qq.com/connect/qrconnect`      |
+| Token URL     | `https://api.weixin.qq.com/sns/oauth2/access_token` |
+| User API URL  | `https://api.weixin.qq.com/sns/userinfo`            |
+| Scopes        | `snsapi_login`                                      |
+
+### 前端集成（PC 扫码登录）
+
+```html
+<div id="wechat-qrcode"></div>
+
+<script src="https://res.wx.qq.com/connect/zh_CN/htmledition/js/wxLogin.js"></script>
+<script>
+  const APPID = "your-open-platform-appid";
+  const REDIRECT_URI = encodeURIComponent(
+    "https://your-domain.com/wechat-callback",
+  );
+
+  new WxLogin({
+    id: "wechat-qrcode",
+    appid: APPID,
+    scope: "snsapi_login",
+    redirect_uri: REDIRECT_URI,
+    state: Math.random().toString(36).substring(7),
+    style: "black",
+    href: "", // 自定义样式 CSS 链接
+  });
+</script>
+```
+
+### 自定义二维码样式
+
+```css
+/* 自定义微信登录二维码样式 */
+.impowerBox .qrcode {
+  width: 200px;
+}
+.impowerBox .title {
+  display: none;
+}
+.impowerBox .info {
+  width: 200px;
+}
+.status_icon {
+  display: none;
+}
+.impowerBox .status {
+  text-align: center;
+}
+```
+
+将 CSS 上传到服务器，然后在 `href` 参数中指定 URL。
+
+## 微信小程序登录
+
+微信小程序使用独特的登录流程，需要通过 `wx.login` 获取临时登录凭证。
+
+### 配置小程序
+
+<Steps>
+
+1. **登录微信公众平台小程序后台**
+
+   访问 [微信公众平台](https://mp.weixin.qq.com/)，使用小程序账号登录。
+
+2. **获取 AppID 和 AppSecret**
+
+   进入「开发」->「开发管理」->「开发设置」：
+   - 记录 AppID
+   - 生成并记录 AppSecret
+
+3. **配置服务器域名**
+
+   进入「开发」->「开发管理」->「开发设置」->「服务器域名」：
+   - request 合法域名：添加 `https://your-domain.com`
+
+</Steps>
+
+### PocketBase 服务端配置
+
+小程序登录需要在服务端处理，创建自定义 API 端点：
+
+```javascript
+// pb_hooks/miniprogram_auth.pb.js
+/// <reference path="../pb_data/types.d.ts" />
+
+routerAdd("POST", "/api/miniprogram-login", (c) => {
+  const data = $apis.requestInfo(c).data;
+  const code = data.code;
+  const userInfo = data.userInfo; // 可选，用户授权后的信息
+
+  if (!code) {
+    throw new BadRequestError("缺少登录凭证");
+  }
+
+  const APPID = $os.getenv("MINIPROGRAM_APPID");
+  const SECRET = $os.getenv("MINIPROGRAM_SECRET");
+
+  // 1. 调用微信接口获取 session_key 和 openid
+  const res = $http.send({
+    url: `https://api.weixin.qq.com/sns/jscode2session?appid=${APPID}&secret=${SECRET}&js_code=${code}&grant_type=authorization_code`,
+    method: "GET",
+  });
+
+  const sessionData = JSON.parse(res.raw);
+
+  if (sessionData.errcode) {
+    throw new BadRequestError("登录失败: " + sessionData.errmsg);
+  }
+
+  const { openid, session_key, unionid } = sessionData;
+
+  // 2. 查找或创建用户
+  const usersCollection = $app.dao().findCollectionByNameOrId("users");
+  let user;
+  let isNewUser = false;
+
+  try {
+    user = $app
+      .dao()
+      .findFirstRecordByData("users", "miniprogram_openid", openid);
+  } catch (e) {
+    // 用户不存在，创建新用户
+    isNewUser = true;
+    user = new Record(usersCollection, {
+      miniprogram_openid: openid,
+      unionid: unionid || "",
+    });
+
+    // 如果有用户信息，保存昵称和头像
+    if (userInfo) {
+      user.set("name", userInfo.nickName);
+      user.set("avatar", userInfo.avatarUrl);
+    }
+
+    $app.dao().saveRecord(user);
+  }
+
+  // 3. 生成认证 token
+  const token = $tokens.recordAuthToken($app, user);
+
+  return c.json(200, {
+    token: token,
+    record: user,
+    isNewUser: isNewUser,
+  });
+});
+
+// 更新用户信息接口
+routerAdd(
+  "POST",
+  "/api/miniprogram-update-profile",
+  (c) => {
+    const data = $apis.requestInfo(c).data;
+    const authRecord = c.get("authRecord");
+
+    if (!authRecord) {
+      throw new UnauthorizedError("请先登录");
+    }
+
+    // 更新用户信息
+    authRecord.set("name", data.nickName);
+    authRecord.set("avatar", data.avatarUrl);
+    authRecord.set("gender", data.gender);
+
+    $app.dao().saveRecord(authRecord);
+
+    return c.json(200, { success: true });
+  },
+  $apis.requireRecordAuth(),
+);
+```
+
+### 小程序端代码
+
+```javascript
+// utils/auth.js
+const app = getApp();
+
+// 登录函数
+export async function login() {
+  return new Promise((resolve, reject) => {
+    wx.login({
+      success: async (res) => {
+        if (res.code) {
+          try {
+            // 发送 code 到后端
+            const response = await wx.request({
+              url: "https://your-domain.com/api/miniprogram-login",
+              method: "POST",
+              data: { code: res.code },
+            });
+
+            if (response.data.token) {
+              // 保存登录状态
+              wx.setStorageSync("pb_token", response.data.token);
+              wx.setStorageSync("pb_user", response.data.record);
+              resolve(response.data);
+            } else {
+              reject(new Error("登录失败"));
+            }
+          } catch (error) {
+            reject(error);
+          }
+        } else {
+          reject(new Error("获取登录凭证失败"));
+        }
+      },
+      fail: reject,
+    });
+  });
+}
+
+// 获取用户信息（需要用户授权）
+export async function getUserProfile() {
+  return new Promise((resolve, reject) => {
+    wx.getUserProfile({
+      desc: "用于完善用户资料",
+      success: async (res) => {
+        const userInfo = res.userInfo;
+
+        // 更新后端用户信息
+        const token = wx.getStorageSync("pb_token");
+        await wx.request({
+          url: "https://your-domain.com/api/miniprogram-update-profile",
+          method: "POST",
+          header: {
+            Authorization: token,
+          },
+          data: userInfo,
+        });
+
+        // 更新本地存储
+        const user = wx.getStorageSync("pb_user");
+        user.name = userInfo.nickName;
+        user.avatar = userInfo.avatarUrl;
+        wx.setStorageSync("pb_user", user);
+
+        resolve(userInfo);
+      },
+      fail: reject,
+    });
+  });
+}
+
+// 检查登录状态
+export function isLoggedIn() {
+  const token = wx.getStorageSync("pb_token");
+  return !!token;
+}
+
+// 退出登录
+export function logout() {
+  wx.removeStorageSync("pb_token");
+  wx.removeStorageSync("pb_user");
+}
+```
+
+### 小程序页面示例
+
+```javascript
+// pages/login/login.js
+import { login, getUserProfile, isLoggedIn } from "../../utils/auth";
+
+Page({
+  data: {
+    loading: false,
+    isLoggedIn: false,
+    userInfo: null,
+  },
+
+  onLoad() {
+    this.setData({ isLoggedIn: isLoggedIn() });
+
+    if (isLoggedIn()) {
+      const user = wx.getStorageSync("pb_user");
+      this.setData({ userInfo: user });
+    }
+  },
+
+  // 快速登录（不获取用户信息）
+  async handleQuickLogin() {
+    this.setData({ loading: true });
+
+    try {
+      const result = await login();
+
+      if (result.isNewUser) {
+        // 新用户，引导完善资料
+        wx.showModal({
+          title: "完善资料",
+          content: "是否授权获取您的头像和昵称？",
+          success: async (res) => {
+            if (res.confirm) {
+              await this.handleGetProfile();
+            }
+          },
+        });
+      }
+
+      this.setData({
+        isLoggedIn: true,
+        userInfo: result.record,
+      });
+
+      wx.showToast({ title: "登录成功", icon: "success" });
+    } catch (error) {
+      wx.showToast({ title: "登录失败", icon: "error" });
+    } finally {
+      this.setData({ loading: false });
+    }
+  },
+
+  // 获取用户资料
+  async handleGetProfile() {
+    try {
+      const userInfo = await getUserProfile();
+      this.setData({ userInfo });
+      wx.showToast({ title: "资料已更新", icon: "success" });
+    } catch (error) {
+      console.error("获取用户资料失败:", error);
+    }
+  },
+});
+```
+
+```html
+<!-- pages/login/login.wxml -->
+<view class="container">
+  <view wx:if="{{!isLoggedIn}}">
+    <button type="primary" loading="{{loading}}" bindtap="handleQuickLogin">
+      微信一键登录
+    </button>
+  </view>
+
+  <view wx:else class="user-info">
+    <image src="{{userInfo.avatar}}" class="avatar" />
+    <text class="name">{{userInfo.name || '微信用户'}}</text>
+
+    <button
+      wx:if="{{!userInfo.name}}"
+      type="default"
+      size="mini"
+      bindtap="handleGetProfile"
+    >
+      完善资料
+    </button>
+  </view>
+</view>
+```
+
+## UnionID 统一用户
+
+如果您同时有公众号、小程序、APP 等多个微信产品，可以通过 UnionID 统一用户身份。
+
+### 获取 UnionID 的条件
+
+- 公众号和小程序都绑定到同一个开放平台账号
+- 用户关注了公众号或进行了授权
+
+### 用户关联示例
+
+```javascript
+// pb_hooks/wechat_union.pb.js
+function findOrCreateUserByUnionId(unionid, openid, source) {
+  const usersCollection = $app.dao().findCollectionByNameOrId("users");
+  let user;
+
+  // 1. 先尝试通过 unionid 查找
+  if (unionid) {
+    try {
+      user = $app
+        .dao()
+        .findFirstRecordByData("users", "wechat_unionid", unionid);
+      // 找到了，更新对应的 openid
+      if (source === "miniprogram") {
+        user.set("miniprogram_openid", openid);
+      } else if (source === "mp") {
+        user.set("mp_openid", openid);
+      }
+      $app.dao().saveRecord(user);
+      return { user, isNew: false };
+    } catch (e) {
+      // 没找到，继续
+    }
+  }
+
+  // 2. 通过 openid 查找
+  const openidField =
+    source === "miniprogram" ? "miniprogram_openid" : "mp_openid";
+  try {
+    user = $app.dao().findFirstRecordByData("users", openidField, openid);
+    // 更新 unionid
+    if (unionid && !user.getString("wechat_unionid")) {
+      user.set("wechat_unionid", unionid);
+      $app.dao().saveRecord(user);
+    }
+    return { user, isNew: false };
+  } catch (e) {
+    // 没找到
+  }
+
+  // 3. 创建新用户
+  user = new Record(usersCollection, {
+    wechat_unionid: unionid || "",
+    [openidField]: openid,
+  });
+  $app.dao().saveRecord(user);
+
+  return { user, isNew: true };
+}
+```
+
+## 常见问题
+
+### Q: 公众号网页授权提示 redirect_uri 参数错误？
+
+**原因**：授权域名配置不正确。
+
+**解决**：
+
+1. 确认已在公众号后台配置网页授权域名
+2. 域名不需要加 `http://` 或 `https://`
+3. 确认验证文件已正确放置
+
+### Q: 获取不到用户头像和昵称？
+
+**原因**：微信在 2022 年调整了隐私政策，小程序不再默认返回真实昵称和头像。
+
+**解决**：
+
+1. 使用 `wx.getUserProfile` API 主动获取
+2. 引导用户使用头像昵称填写组件
+
+### Q: UnionID 获取不到？
+
+**原因**：应用未绑定到开放平台，或用户未关注公众号。
+
+**解决**：
+
+1. 将所有应用绑定到同一个开放平台账号
+2. 对于小程序，用户需要关注公众号才能获取 UnionID
+
+### Q: session_key 有效期是多久？
+
+微信没有明确说明 session_key 的有效期，建议：
+
+1. 每次用户使用小程序时调用 `wx.checkSession` 检查
+2. 如果失效，重新调用 `wx.login`
+
+```javascript
+wx.checkSession({
+  success() {
+    // session_key 未过期
+  },
+  fail() {
+    // session_key 已过期，需要重新登录
+    login();
+  },
+});
+```
+
+### Q: 如何处理手机号登录？
+
+小程序获取用户手机号需要额外配置：
+
+```javascript
+// 小程序端
+<button open-type="getPhoneNumber" bindgetphonenumber="handleGetPhone">
+  获取手机号
+</button>
+
+// 获取到加密数据后发送到后端解密
+handleGetPhone(e) {
+  if (e.detail.code) {
+    // 将 code 发送到后端换取手机号
+    wx.request({
+      url: 'https://your-domain.com/api/get-phone',
+      method: 'POST',
+      data: { code: e.detail.code },
+    });
+  }
+}
+```
+
+## 安全建议
+
+1. **保护 AppSecret**：永远不要在前端暴露 AppSecret
+2. **验证 session_key**：后端应验证 session_key 的有效性
+3. **使用 HTTPS**：所有 API 调用必须使用 HTTPS
+4. **设置 IP 白名单**：在公众号后台配置服务器 IP 白名单
+5. **定期更换密钥**：定期更新 AppSecret
+6. **监控异常登录**：记录和监控登录活动
+
+## 下一步
+
+- 查看 [OAuth2 认证配置](/guides/auth/oauth2) 了解更多登录方式
+- 了解 [认证指南](/docs/guides/authentication) 掌握完整认证知识
+- 探索 [小程序 SDK](/sdk/miniprogram) 了解更多小程序集成

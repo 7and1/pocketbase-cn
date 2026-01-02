@@ -1,0 +1,688 @@
+---
+title: OAuth2 认证配置
+description: 为 PocketBase 配置 GitHub、Google、微信等 OAuth2 登录
+---
+
+import {
+  Steps,
+  Aside,
+  Tabs,
+  TabItem,
+  Code,
+} from "@astrojs/starlight/components";
+
+PocketBase 内置支持多种 OAuth2 认证提供商，用户可以使用第三方账号快速登录您的应用。本文详细介绍如何配置各种 OAuth2 登录方式。
+
+## OAuth2 认证概述
+
+### 什么是 OAuth2
+
+OAuth2 是一个开放标准的授权协议，允许用户授权第三方应用访问其在另一个服务上的资源，而无需分享密码。常见的「使用 GitHub 登录」「使用 Google 登录」等功能都基于 OAuth2 实现。
+
+### OAuth2 认证流程
+
+```
+用户 -> 点击「使用 GitHub 登录」
+     -> 跳转到 GitHub 授权页面
+     -> 用户同意授权
+     -> GitHub 重定向回您的应用（带授权码）
+     -> PocketBase 用授权码换取访问令牌
+     -> 获取用户信息，创建或登录用户
+```
+
+### PocketBase 支持的 OAuth2 提供商
+
+PocketBase 内置支持以下 OAuth2 提供商：
+
+| 提供商    | 适用场景     | 国内可用性 |
+| --------- | ------------ | ---------- |
+| GitHub    | 开发者应用   | 需翻墙     |
+| Google    | 国际化应用   | 需翻墙     |
+| Apple     | iOS 应用     | 可用       |
+| Microsoft | 企业应用     | 可用       |
+| Discord   | 游戏社区     | 需翻墙     |
+| Spotify   | 音乐应用     | 需翻墙     |
+| Twitch    | 直播应用     | 需翻墙     |
+| GitLab    | 企业开发者   | 可用       |
+| Gitee     | 国内开发者   | 可用       |
+| 微信      | 国内应用     | 可用       |
+| OIDC      | 自定义提供商 | -          |
+
+## 通用配置步骤
+
+所有 OAuth2 提供商的配置流程类似：
+
+<Steps>
+
+1. **在提供商平台创建 OAuth 应用**
+
+   获取 Client ID 和 Client Secret。
+
+2. **配置回调 URL**
+
+   设置授权回调地址为：
+
+   ```
+   https://your-domain.com/api/oauth2-redirect
+   ```
+
+3. **在 PocketBase 中配置提供商**
+
+   填入 Client ID 和 Client Secret。
+
+4. **前端集成登录按钮**
+
+   调用 PocketBase SDK 发起 OAuth2 认证。
+
+</Steps>
+
+<Aside type="tip">
+  回调 URL 必须使用 HTTPS（本地开发除外），且域名必须与 PocketBase
+  服务域名一致。
+</Aside>
+
+## GitHub 登录配置
+
+GitHub 是开发者最常用的 OAuth2 提供商。
+
+### 创建 GitHub OAuth App
+
+<Steps>
+
+1. **访问 GitHub 设置**
+
+   登录 GitHub，进入 [Developer Settings](https://github.com/settings/developers)。
+
+2. **创建新应用**
+
+   点击「OAuth Apps」->「New OAuth App」：
+
+   | 字段                       | 值                                            |
+   | -------------------------- | --------------------------------------------- |
+   | Application name           | `Your App Name`                               |
+   | Homepage URL               | `https://your-domain.com`                     |
+   | Authorization callback URL | `https://your-domain.com/api/oauth2-redirect` |
+
+3. **获取凭证**
+
+   创建后记录：
+   - **Client ID**：自动生成
+   - **Client Secret**：点击「Generate a new client secret」
+
+</Steps>
+
+<Aside type="caution">
+  Client Secret 仅显示一次，请立即保存。如果丢失，需要重新生成。
+</Aside>
+
+### PocketBase 配置
+
+<Steps>
+
+1. **登录管理后台**
+
+   访问 `https://your-domain.com/_/`
+
+2. **进入认证设置**
+
+   Settings -> Auth providers -> GitHub
+
+3. **填写配置**
+   - 启用「Enable」
+   - 填入 Client ID
+   - 填入 Client Secret
+
+4. **保存**
+
+   点击「Save changes」
+
+</Steps>
+
+### 前端集成
+
+<Tabs>
+  <TabItem label="JavaScript">
+```javascript
+import PocketBase from 'pocketbase';
+
+const pb = new PocketBase('https://your-domain.com');
+
+async function loginWithGitHub() {
+try {
+const authData = await pb.collection('users').authWithOAuth2({
+provider: 'github'
+});
+
+    console.log('登录成功:', authData.meta.name);
+    console.log('邮箱:', authData.meta.email);
+    console.log('头像:', authData.meta.avatarUrl);
+
+} catch (error) {
+console.error('登录失败:', error);
+}
+}
+
+````
+  </TabItem>
+  <TabItem label="Vue 3">
+```vue
+<template>
+  <button @click="loginWithGitHub" :disabled="loading">
+    {{ loading ? '登录中...' : '使用 GitHub 登录' }}
+  </button>
+</template>
+
+<script setup>
+import { ref } from 'vue';
+import PocketBase from 'pocketbase';
+
+const pb = new PocketBase('https://your-domain.com');
+const loading = ref(false);
+
+async function loginWithGitHub() {
+  loading.value = true;
+  try {
+    const authData = await pb.collection('users').authWithOAuth2({
+      provider: 'github'
+    });
+    // 登录成功，跳转到首页
+    window.location.href = '/dashboard';
+  } catch (error) {
+    alert('登录失败: ' + error.message);
+  } finally {
+    loading.value = false;
+  }
+}
+</script>
+````
+
+  </TabItem>
+  <TabItem label="React">
+```jsx
+import { useState } from 'react';
+import PocketBase from 'pocketbase';
+
+const pb = new PocketBase('https://your-domain.com');
+
+function GitHubLoginButton() {
+const [loading, setLoading] = useState(false);
+
+async function handleLogin() {
+setLoading(true);
+try {
+const authData = await pb.collection('users').authWithOAuth2({
+provider: 'github'
+});
+// 登录成功
+window.location.href = '/dashboard';
+} catch (error) {
+alert('登录失败: ' + error.message);
+} finally {
+setLoading(false);
+}
+}
+
+return (
+
+<button onClick={handleLogin} disabled={loading}>
+{loading ? '登录中...' : '使用 GitHub 登录'}
+</button>
+);
+}
+
+````
+  </TabItem>
+</Tabs>
+
+## Google 登录配置
+
+Google 是全球用户量最大的 OAuth2 提供商。
+
+### 创建 Google OAuth 凭证
+
+<Steps>
+
+1. **访问 Google Cloud Console**
+
+   进入 [Google Cloud Console](https://console.cloud.google.com/)。
+
+2. **创建或选择项目**
+
+   如果没有项目，先创建一个新项目。
+
+3. **启用 API**
+
+   进入「APIs & Services」->「Library」，启用「Google+ API」或「People API」。
+
+4. **配置 OAuth 同意屏幕**
+
+   「OAuth consent screen」中配置：
+   - User Type: External
+   - App name: 您的应用名称
+   - User support email: 您的邮箱
+   - Authorized domains: your-domain.com
+
+5. **创建 OAuth 凭证**
+
+   「Credentials」->「Create Credentials」->「OAuth 2.0 Client IDs」：
+
+   | 字段 | 值 |
+   |------|-----|
+   | Application type | Web application |
+   | Name | `PocketBase App` |
+   | Authorized redirect URIs | `https://your-domain.com/api/oauth2-redirect` |
+
+6. **保存凭证**
+
+   记录 Client ID 和 Client Secret。
+
+</Steps>
+
+### PocketBase 配置
+
+在 Settings -> Auth providers -> Google 中填入凭证。
+
+### 获取额外权限（可选）
+
+默认情况下，Google OAuth 只返回基本信息。如需访问更多用户数据：
+
+```javascript
+const authData = await pb.collection('users').authWithOAuth2({
+  provider: 'google',
+  scopes: [
+    'https://www.googleapis.com/auth/userinfo.email',
+    'https://www.googleapis.com/auth/userinfo.profile',
+    'https://www.googleapis.com/auth/calendar.readonly', // 日历只读
+  ],
+});
+````
+
+## Gitee 登录配置
+
+Gitee（码云）是国内最大的代码托管平台，适合国内应用使用。
+
+### 创建 Gitee OAuth 应用
+
+<Steps>
+
+1. **登录 Gitee**
+
+   访问 [Gitee 设置](https://gitee.com/oauth/applications)。
+
+2. **创建应用**
+
+   点击「创建应用」：
+
+   | 字段         | 值                                            |
+   | ------------ | --------------------------------------------- |
+   | 应用名称     | `Your App Name`                               |
+   | 应用主页     | `https://your-domain.com`                     |
+   | 应用回调地址 | `https://your-domain.com/api/oauth2-redirect` |
+   | 权限         | 勾选「user_info」                             |
+
+3. **获取凭证**
+
+   创建后获取 Client ID 和 Client Secret。
+
+</Steps>
+
+### PocketBase 配置
+
+在 Settings -> Auth providers -> Gitee 中填入凭证。
+
+### 前端集成
+
+```javascript
+const authData = await pb.collection("users").authWithOAuth2({
+  provider: "gitee",
+});
+
+console.log("Gitee 用户名:", authData.meta.username);
+```
+
+## Apple 登录配置
+
+Apple Sign In 是 iOS 应用的推荐登录方式，特别是如果您的应用提供了第三方登录选项。
+
+### 前置条件
+
+- 有效的 Apple Developer 账号（每年 99 美元）
+- 已注册 App ID 并启用 Sign in with Apple
+
+### 创建 Service ID
+
+<Steps>
+
+1. **登录 Apple Developer**
+
+   访问 [Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources)。
+
+2. **创建 Identifier**
+
+   Identifiers -> 「+」按钮 -> Services IDs：
+
+   | 字段        | 值                    |
+   | ----------- | --------------------- |
+   | Description | `PocketBase Auth`     |
+   | Identifier  | `com.yourdomain.auth` |
+
+3. **配置 Sign In with Apple**
+
+   启用「Sign In with Apple」，配置：
+   - Primary App ID: 选择您的 App
+   - Domains: `your-domain.com`
+   - Return URLs: `https://your-domain.com/api/oauth2-redirect`
+
+4. **创建 Key**
+
+   Keys -> 「+」按钮：
+   - Key Name: `PocketBase Key`
+   - 启用「Sign in with Apple」
+   - 下载 `.p8` 密钥文件
+
+</Steps>
+
+<Aside type="danger">
+  密钥文件只能下载一次，请妥善保管。如果丢失，需要创建新的 Key。
+</Aside>
+
+### PocketBase 配置
+
+Apple Sign In 需要特殊配置：
+
+| 配置项      | 值                                     |
+| ----------- | -------------------------------------- |
+| Client ID   | Service ID（如 `com.yourdomain.auth`） |
+| Team ID     | 您的 Apple Developer Team ID           |
+| Key ID      | 创建的 Key 的 ID                       |
+| Private Key | `.p8` 文件内容                         |
+
+## 自定义 OIDC 提供商
+
+如果 PocketBase 不支持您需要的 OAuth2 提供商，可以使用 OIDC（OpenID Connect）通用配置。
+
+### 配置示例：Keycloak
+
+Keycloak 是流行的开源身份认证服务器。
+
+<Steps>
+
+1. **在 Keycloak 中创建 Client**
+   - Client ID: `pocketbase`
+   - Client Protocol: `openid-connect`
+   - Root URL: `https://your-domain.com`
+   - Valid Redirect URIs: `https://your-domain.com/api/oauth2-redirect`
+
+2. **获取配置信息**
+
+   从 Keycloak Realm Settings 获取：
+   - Issuer URL: `https://keycloak.example.com/realms/your-realm`
+   - Client Secret: 在 Client Credentials 中生成
+
+3. **PocketBase OIDC 配置**
+
+   在 Settings -> Auth providers -> OIDC 中配置：
+
+   | 配置项        | 值                                                                                |
+   | ------------- | --------------------------------------------------------------------------------- |
+   | Name          | `keycloak`                                                                        |
+   | Client ID     | `pocketbase`                                                                      |
+   | Client Secret | 生成的 Secret                                                                     |
+   | Auth URL      | `https://keycloak.example.com/realms/your-realm/protocol/openid-connect/auth`     |
+   | Token URL     | `https://keycloak.example.com/realms/your-realm/protocol/openid-connect/token`    |
+   | User API URL  | `https://keycloak.example.com/realms/your-realm/protocol/openid-connect/userinfo` |
+
+</Steps>
+
+### 配置示例：Auth0
+
+<Steps>
+
+1. **创建 Auth0 应用**
+   - Application Type: Regular Web Applications
+   - Allowed Callback URLs: `https://your-domain.com/api/oauth2-redirect`
+
+2. **PocketBase 配置**
+
+   | 配置项       | 值                                          |
+   | ------------ | ------------------------------------------- |
+   | Auth URL     | `https://YOUR_DOMAIN.auth0.com/authorize`   |
+   | Token URL    | `https://YOUR_DOMAIN.auth0.com/oauth/token` |
+   | User API URL | `https://YOUR_DOMAIN.auth0.com/userinfo`    |
+
+</Steps>
+
+## 前端完整示例
+
+### 多提供商登录页面
+
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>登录</title>
+    <style>
+      .login-buttons {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        max-width: 300px;
+        margin: 50px auto;
+      }
+      .login-btn {
+        padding: 12px 24px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+      }
+      .github {
+        background: #24292e;
+        color: white;
+      }
+      .google {
+        background: #4285f4;
+        color: white;
+      }
+      .gitee {
+        background: #c71d23;
+        color: white;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="login-buttons">
+      <button class="login-btn github" onclick="login('github')">
+        使用 GitHub 登录
+      </button>
+      <button class="login-btn google" onclick="login('google')">
+        使用 Google 登录
+      </button>
+      <button class="login-btn gitee" onclick="login('gitee')">
+        使用 Gitee 登录
+      </button>
+    </div>
+
+    <script type="module">
+      import PocketBase from "https://cdn.jsdelivr.net/npm/pocketbase@0.21.0/dist/pocketbase.es.mjs";
+
+      const pb = new PocketBase("https://your-domain.com");
+
+      window.login = async function (provider) {
+        try {
+          const authData = await pb
+            .collection("users")
+            .authWithOAuth2({ provider });
+
+          // 保存用户信息
+          console.log("用户信息:", {
+            id: authData.record.id,
+            email: authData.record.email,
+            name: authData.meta.name,
+            avatar: authData.meta.avatarUrl,
+          });
+
+          // 跳转到应用主页
+          window.location.href = "/dashboard";
+        } catch (error) {
+          alert("登录失败: " + error.message);
+        }
+      };
+    </script>
+  </body>
+</html>
+```
+
+### 处理用户数据同步
+
+OAuth2 登录后，您可能需要同步用户信息到自定义字段：
+
+```javascript
+async function loginAndSync(provider) {
+  const authData = await pb.collection("users").authWithOAuth2({ provider });
+
+  // 检查是否需要更新用户信息
+  const user = authData.record;
+  const meta = authData.meta;
+
+  // 如果是新用户或信息有变化，更新记录
+  if (!user.name || user.name !== meta.name) {
+    await pb.collection("users").update(user.id, {
+      name: meta.name,
+      avatar: meta.avatarUrl,
+    });
+  }
+
+  return authData;
+}
+```
+
+## 高级配置
+
+### 自定义用户创建逻辑
+
+使用 PocketBase Hooks 可以在 OAuth2 用户创建时执行自定义逻辑：
+
+```javascript
+// pb_hooks/oauth.pb.js
+onRecordAfterCreateRequest((e) => {
+  // 检查是否是 OAuth2 创建的用户
+  if (e.record.collection().name === "users") {
+    const authMeta = e.httpContext.get("authMeta");
+    if (authMeta && authMeta.isNew) {
+      // 发送欢迎邮件
+      // 初始化用户配置
+      // 记录注册来源
+    }
+  }
+}, "users");
+```
+
+### 限制允许的 OAuth2 提供商
+
+如果只想允许特定域名的用户登录：
+
+```javascript
+// pb_hooks/oauth_filter.pb.js
+onRecordBeforeCreateRequest((e) => {
+  if (e.record.collection().name === "users") {
+    const email = e.record.getString("email");
+
+    // 只允许公司邮箱登录
+    if (!email.endsWith("@yourcompany.com")) {
+      throw new BadRequestError("只允许公司邮箱登录");
+    }
+  }
+}, "users");
+```
+
+### 关联现有账号
+
+允许用户将 OAuth2 账号关联到已有的邮箱密码账号：
+
+```javascript
+async function linkOAuthAccount(provider) {
+  // 用户必须已登录
+  if (!pb.authStore.isValid) {
+    throw new Error("请先登录");
+  }
+
+  const authData = await pb.collection("users").authWithOAuth2({
+    provider,
+    // 将 OAuth 关联到当前用户
+    createData: {
+      // 不创建新用户，而是关联到现有用户
+    },
+  });
+
+  return authData;
+}
+```
+
+## 常见问题
+
+### Q: 回调 URL 不匹配错误？
+
+**原因**：OAuth2 提供商配置的回调 URL 与实际请求不一致。
+
+**解决**：
+
+- 确保回调 URL 完全一致（包括 https/http、斜杠等）
+- 检查域名是否正确
+- 本地开发使用 `http://localhost:8090/api/oauth2-redirect`
+
+### Q: 如何获取用户的访问令牌？
+
+OAuth2 登录后，访问令牌存储在 `authData.meta` 中：
+
+```javascript
+const authData = await pb
+  .collection("users")
+  .authWithOAuth2({ provider: "github" });
+console.log("Access Token:", authData.meta.accessToken);
+// 注意：访问令牌有有效期限制
+```
+
+### Q: 如何刷新用户信息？
+
+```javascript
+// 刷新当前登录用户的 OAuth 信息
+await pb.collection("users").authRefresh();
+```
+
+### Q: 用户使用不同 OAuth 提供商但相同邮箱，会创建多个账号吗？
+
+默认情况下，PocketBase 会根据邮箱合并账号。如果邮箱相同，会关联到已有账号。
+
+### Q: 如何禁用某个 OAuth2 提供商？
+
+在 PocketBase 管理后台，进入 Settings -> Auth providers，取消对应提供商的「Enable」开关。
+
+### Q: OAuth2 登录后如何设置密码？
+
+```javascript
+// OAuth2 登录的用户可以设置密码
+await pb.collection("users").update(pb.authStore.model.id, {
+  password: "newPassword123",
+  passwordConfirm: "newPassword123",
+});
+```
+
+## 安全建议
+
+1. **始终使用 HTTPS**：OAuth2 回调必须使用 HTTPS
+2. **保护 Client Secret**：不要在前端代码中暴露 Client Secret
+3. **限制回调域名**：只配置必要的回调 URL
+4. **定期轮换密钥**：定期更换 Client Secret
+5. **监控异常登录**：记录和监控 OAuth2 登录活动
+6. **实施速率限制**：防止暴力攻击
+
+## 下一步
+
+- 了解 [微信登录集成](/guides/auth/wechat) 配置国内最常用的登录方式
+- 查看 [认证指南](/docs/guides/authentication) 了解更多认证选项
+- 探索 [API 规则](/docs/guides/api-rules) 配置访问权限

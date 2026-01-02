@@ -1,0 +1,305 @@
+---
+title: 宝塔面板部署
+description: 使用宝塔面板在服务器上部署 PocketBase 的完整指南
+---
+
+宝塔面板是一款流行的服务器管理工具，可以简化 PocketBase 的部署流程。本文介绍如何在宝塔面板环境中部署 PocketBase。
+
+## 环境准备
+
+### 安装宝塔面板
+
+```bash
+# Ubuntu/Debian 安装
+wget -O install.sh https://download.bt.cn/install/install-ubuntu_6.0.sh && sudo bash install.sh
+
+# CentOS 安装
+wget -O install.sh https://download.bt.cn/install/install_6.0.sh && sudo bash install.sh
+```
+
+安装完成后会显示面板地址和登录信息。
+
+### 登录宝塔面板
+
+1. 访问面板地址：`http://your-server-ip:8888`
+2. 输入用户名和密码登录
+
+## 安装 PocketBase
+
+### 方式一：使用宝塔终端
+
+1. 在宝塔面板左侧菜单选择「终端」
+2. 执行以下命令：
+
+```bash
+# 创建应用目录
+mkdir -p /www/wwwroot/pocketbase
+cd /www/wwwroot/pocketbase
+
+# 下载 PocketBase
+PB_VERSION=$(curl -s https://api.github.com/repos/pocketbase/pocketbase/releases/latest | grep 'tag_name' | cut -d\" -f4)
+wget https://github.com/pocketbase/pocketbase/releases/download/${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip
+
+# 解压
+unzip pocketbase_${PB_VERSION}_linux_amd64.zip
+rm pocketbase_${PB_VERSION}_linux_amd64.zip
+
+# 添加执行权限
+chmod +x pocketbase
+
+# 测试运行
+./pocketbase serve
+```
+
+### 方式二：使用文件管理器
+
+1. 在宝塔面板选择「文件」
+2. 进入 `/www/wwwroot/`
+3. 创建 `pocketbase` 目录
+4. 上传下载的 PocketBase 压缩包
+5. 解压文件
+6. 设置 `pocketbase` 文件权限为 755
+
+## 配置 Supervisor 守护进程
+
+### 安装 Supervisor
+
+在宝塔面板中选择「软件商店」，搜索并安装 `Supervisor管理器`。
+
+### 添加 PocketBase 进程
+
+1. 进入「Supervisor管理器」
+2. 点击「添加守护进程」
+3. 填写配置：
+
+| 配置项   | 值                                                             |
+| -------- | -------------------------------------------------------------- |
+| 进程名称 | pocketbase                                                     |
+| 启动用户 | www（或 root）                                                 |
+| 运行目录 | /www/wwwroot/pocketbase                                        |
+| 启动命令 | /www/wwwroot/pocketbase/pocketbase serve --http=127.0.0.1:8090 |
+| 进程数量 | 1                                                              |
+
+4. 点击「提交」
+
+### 管理进程
+
+- **启动进程**：点击操作列的「启动」
+- **停止进程**：点击操作列的「停止」
+- **重启进程**：点击操作列的「重启」
+- **查看日志**：点击操作列的「日志」
+
+## 配置 Nginx 反向代理
+
+### 添加网站
+
+1. 在宝塔面板选择「网站」
+2. 点击「添加站点」
+3. 填写域名（如 `pb.example.com`）
+4. PHP 版本选择「纯静态」
+5. 点击「提交」
+
+### 配置 SSL
+
+1. 进入网站设置
+2. 选择「SSL」
+3. 选择「Let's Encrypt」
+4. 点击「申请」
+5. 等待证书申请完成
+
+### 配置反向代理
+
+1. 进入网站设置
+2. 选择「反向代理」
+3. 点击「添加反向代理」
+
+填写配置：
+
+| 配置项   | 值                    |
+| -------- | --------------------- |
+| 代理名称 | pocketbase            |
+| 目标 URL | http://127.0.0.1:8090 |
+| 发送域名 | $host                 |
+
+4. 点击「提交」
+
+### 高级配置
+
+点击配置文件的「配置」，添加以下内容：
+
+```nginx
+# WebSocket 支持
+location / {
+    proxy_pass http://127.0.0.1:8090;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 60s;
+    proxy_read_timeout 60s;
+}
+```
+
+## 配置防火墙
+
+### 宝塔面板防火墙
+
+1. 选择「安全」
+2. 添加端口规则：
+   - 放行 80 端口（HTTP）
+   - 放行 443 端口（HTTPS）
+
+### 云服务商安全组
+
+在阿里云/腾讯云控制台添加安全组规则：
+
+| 协议 | 端口 | 说明             |
+| ---- | ---- | ---------------- |
+| TCP  | 80   | HTTP             |
+| TCP  | 443  | HTTPS            |
+| TCP  | 8888 | 宝塔面板（可选） |
+
+**注意：** 不要将 8090 端口暴露到公网。
+
+## 配置定时备份
+
+### 使用宝塔计划任务
+
+1. 选择「计划任务」
+2. 点击「添加任务」
+3. 填写配置：
+
+| 配置项   | 值               |
+| -------- | ---------------- |
+| 任务类型 | 备份网站         |
+| 执行周期 | 每天             |
+| 备份到   | 服务器磁盘 / OSS |
+
+### 使用脚本备份
+
+1. 选择「计划任务」
+2. 添加「Shell 脚本」任务
+3. 脚本内容：
+
+```bash
+#!/bin/bash
+# PocketBase 备份脚本
+
+BACKUP_DIR="/www/backup/pocketbase"
+PB_DATA_DIR="/www/wwwroot/pocketbase/pb_data"
+DATE=$(date +%Y%m%d_%H%M%S)
+
+# 创建备份目录
+mkdir -p "$BACKUP_DIR"
+
+# 备份数据
+tar -czf "$BACKUP_DIR/pb_data_$DATE.tar.gz" -C "$PB_DATA_DIR" .
+
+# 删除 7 天前的备份
+find "$BACKUP_DIR" -name "pb_data_*.tar.gz" -mtime +7 -delete
+
+echo "Backup completed: pb_data_$DATE.tar.gz"
+```
+
+4. 设置执行周期为「每天 02:00」
+
+## 性能优化
+
+### 开启 BBR
+
+在宝塔面板中选择「软件商店」->「系统工具」->「Linux工具箱」，开启 TCP BBR。
+
+### 调整 PHP 配置（如使用 PHP）
+
+虽然 PocketBase 不需要 PHP，但如果同服务器有其他站点：
+
+1. 选择「软件商店」->「PHP 设置」
+2. 调整以下参数：
+   - `max_execution_time = 300`
+   - `memory_limit = 256M`
+   - `upload_max_filesize = 50M`
+   - `post_max_size = 50M`
+
+## 监控告警
+
+### 使用宝塔监控
+
+1. 选择「监控」
+2. 启用系统监控
+3. 设置告警阈值：
+   - CPU 使用率 > 80%
+   - 内存使用率 > 85%
+   - 磁盘使用率 > 90%
+
+### 配置告警通知
+
+1. 在「系统设置」->「通知设置」
+2. 配置邮件/微信/钉钉通知
+3. 绑定接收人
+
+## 常见问题
+
+### Q: 502 Bad Gateway 错误？
+
+检查 PocketBase 是否正常运行：
+
+```bash
+# 在宝塔终端执行
+ps aux | grep pocketbase
+
+# 如果没有运行，在 Supervisor 管理器中启动
+```
+
+### Q: 如何更新 PocketBase？
+
+```bash
+# 在宝塔终端执行
+cd /www/wwwroot/pocketbase
+
+# 备份数据
+cp -r pb_data pb_data.backup
+
+# 下载新版本
+PB_VERSION=$(curl -s https://api.github.com/repos/pocketbase/pocketbase/releases/latest | grep 'tag_name' | cut -d\" -f4)
+wget https://github.com/pocketbase/pocketbase/releases/download/${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip
+unzip -o pocketbase_${PB_VERSION}_linux_amd64.zip
+rm pocketbase_${PB_VERSION}_linux_amd64.zip
+
+# 在 Supervisor 管理器中重启进程
+```
+
+### Q: 如何查看详细日志？
+
+1. **Supervisor 日志**：在「Supervisor管理器」中点击「日志」
+2. **Nginx 日志**：在网站设置中选择「日志」
+3. **系统日志**：在「系统日志」中查看
+
+### Q: 内存不足怎么办？
+
+1. 在宝塔面板选择「系统状态」
+2. 查看 PHP-FPM 或其他服务占用
+3. 如果只有 PocketBase，考虑升级服务器配置
+4. 或添加 Swap 分区
+
+### Q: 如何设置多个 PocketBase 实例？
+
+1. 在不同的目录安装多个 PocketBase
+2. 使用不同的端口（8090、8091、8092...）
+3. 为每个实例添加 Supervisor 进程
+4. 为每个域名配置反向代理
+
+### Supervisor 配置示例：
+
+```bash
+# 实例 1
+/www/wwwroot/pb1/pocketbase serve --http=127.0.0.1:8090
+
+# 实例 2
+/www/wwwroot/pb2/pocketbase serve --http=127.0.0.1:8091
+```
+
+Nginx 反向代理对应修改目标端口即可。

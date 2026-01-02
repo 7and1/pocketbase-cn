@@ -1,0 +1,687 @@
+---
+title: Vue 集成
+description: 在 Vue 2 和 Vue 3 项目中集成 PocketBase JS SDK
+---
+
+PocketBase 提供了原生 JavaScript SDK，可以轻松集成到 Vue 项目中。本文介绍 Vue 2 和 Vue 3 的集成方法。
+
+## 安装
+
+```bash
+npm install pocketbase
+# 或
+yarn add pocketbase
+# 或
+pnpm add pocketbase
+```
+
+## Vue 3 集成
+
+### 基础配置
+
+创建 `src/lib/pocketbase.js`：
+
+```javascript
+import PocketBase from "pocketbase";
+
+// 创建 PocketBase 实例
+export const pb = new PocketBase(
+  import.meta.env.VITE_POCKETBASE_URL || "http://127.0.0.1:8090",
+);
+
+// 自动恢复认证状态
+pb.authStore.loadFromCookie(document.cookie);
+
+// 监听认证状态变化，保存到 cookie
+pb.authStore.onChange((token, model) => {
+  document.cookie = pb.authStore.exportToCookie({
+    httpOnly: false,
+    secure: true,
+    sameSite: "lax",
+    maxAge: 604800, // 7 天
+  });
+});
+
+export default pb;
+```
+
+### Composition API 封装
+
+创建 `src/composables/usePocketBase.js`：
+
+```javascript
+import { pb } from "@/lib/pocketbase";
+import { ref, computed } from "vue";
+
+export function usePocketBase() {
+  const isLoading = ref(false);
+  const error = ref(null);
+
+  // 认证状态
+  const isAuthenticated = computed(() => pb.authStore.isValid);
+  const user = computed(() => pb.authStore.model);
+
+  // 登录
+  async function login(email, password) {
+    isLoading.value = true;
+    error.value = null;
+
+    try {
+      const authData = await pb
+        .collection("users")
+        .authWithPassword(email, password);
+      return authData;
+    } catch (err) {
+      error.value = err.message;
+      throw err;
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  // 注册
+  async function register(email, password, passwordConfirm) {
+    isLoading.value = true;
+    error.value = null;
+
+    try {
+      const record = await pb.collection("users").create({
+        email,
+        password,
+        passwordConfirm,
+      });
+      return record;
+    } catch (err) {
+      error.value = err.message;
+      throw err;
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  // 登出
+  function logout() {
+    pb.authStore.clear();
+  }
+
+  // 刷新 Token
+  async function refresh() {
+    try {
+      await pb.collection("users").authRefresh();
+    } catch (err) {
+      logout();
+      throw err;
+    }
+  }
+
+  return {
+    pb,
+    isLoading,
+    error,
+    isAuthenticated,
+    user,
+    login,
+    register,
+    logout,
+    refresh,
+  };
+}
+```
+
+### 数据查询 Composable
+
+创建 `src/composables/useCollection.js`：
+
+```javascript
+import { pb } from "@/lib/pocketbase";
+import { ref, onMounted, onUnmounted } from "vue";
+
+export function useCollection(collectionName, options = {}) {
+  const items = ref([]);
+  const loading = ref(false);
+  const error = ref(null);
+  const totalItems = ref(0);
+  let subscription = null;
+
+  // 获取列表
+  async function getList(page = 1, perPage = 20, filter = "", sort = "") {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      const result = await pb
+        .collection(collectionName)
+        .getList(page, perPage, {
+          filter,
+          sort,
+          expand: options.expand || "",
+        });
+      items.value = result.items;
+      totalItems.value = result.totalItems;
+      return result;
+    } catch (err) {
+      error.value = err.message;
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  // 获取单条
+  async function getOne(id) {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      const record = await pb.collection(collectionName).getOne(id, {
+        expand: options.expand || "",
+      });
+      return record;
+    } catch (err) {
+      error.value = err.message;
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  // 创建
+  async function create(data) {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      const record = await pb.collection(collectionName).create(data);
+      items.value.unshift(record);
+      return record;
+    } catch (err) {
+      error.value = err.message;
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  // 更新
+  async function update(id, data) {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      const record = await pb.collection(collectionName).update(id, data);
+      const index = items.value.findIndex((item) => item.id === id);
+      if (index !== -1) {
+        items.value[index] = record;
+      }
+      return record;
+    } catch (err) {
+      error.value = err.message;
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  // 删除
+  async function remove(id) {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      await pb.collection(collectionName).delete(id);
+      items.value = items.value.filter((item) => item.id !== id);
+    } catch (err) {
+      error.value = err.message;
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  // 实时订阅
+  function subscribe(callback) {
+    subscription = pb.collection(collectionName).subscribe("*", (e) => {
+      callback(e);
+      switch (e.action) {
+        case "create":
+          items.value.unshift(e.record);
+          break;
+        case "update":
+          const idx = items.value.findIndex((r) => r.id === e.record.id);
+          if (idx !== -1) items.value[idx] = e.record;
+          break;
+        case "delete":
+          items.value = items.value.filter((r) => r.id !== e.record.id);
+          break;
+      }
+    });
+  }
+
+  // 取消订阅
+  function unsubscribe() {
+    subscription?.unsubscribe();
+    subscription = null;
+  }
+
+  return {
+    items,
+    loading,
+    error,
+    totalItems,
+    getList,
+    getOne,
+    create,
+    update,
+    remove,
+    subscribe,
+    unsubscribe,
+  };
+}
+```
+
+### 组件使用示例
+
+```vue
+<script setup>
+import { onMounted } from "vue";
+import { usePocketBase } from "@/composables/usePocketBase";
+import { useCollection } from "@/composables/useCollection";
+
+const { user, isAuthenticated, logout } = usePocketBase();
+const {
+  items: posts,
+  getList,
+  subscribe,
+  unsubscribe,
+} = useCollection("posts", {
+  expand: "author",
+});
+
+onMounted(async () => {
+  await getList(1, 20, "status='published'", "-created");
+  subscribe((event) => {
+    console.log("Post changed:", event.action, event.record);
+  });
+});
+
+// 组件卸载时取消订阅
+onUnmounted(() => {
+  unsubscribe();
+});
+</script>
+
+<template>
+  <div>
+    <div v-if="isAuthenticated" class="user-info">
+      <p>Welcome, {{ user.name || user.email }}</p>
+      <button @click="logout">Logout</button>
+    </div>
+
+    <div class="posts">
+      <article v-for="post in posts" :key="post.id" class="post">
+        <h2>{{ post.title }}</h2>
+        <p v-if="post.expand?.author">By {{ post.expand.author.name }}</p>
+        <p>{{ post.excerpt }}</p>
+      </article>
+    </div>
+  </div>
+</template>
+```
+
+### Vue Router 路由守卫
+
+```javascript
+// router/index.js
+import { createRouter, createWebHistory } from "vue-router";
+import { pb } from "@/lib/pocketbase";
+
+const routes = [
+  {
+    path: "/",
+    name: "Home",
+    component: () => import("@/views/Home.vue"),
+  },
+  {
+    path: "/dashboard",
+    name: "Dashboard",
+    component: () => import("@/views/Dashboard.vue"),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: "/login",
+    name: "Login",
+    component: () => import("@/views/Login.vue"),
+  },
+];
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes,
+});
+
+// 路由守卫
+router.beforeEach((to, from, next) => {
+  if (to.meta.requiresAuth && !pb.authStore.isValid) {
+    next({ name: "Login", query: { redirect: to.fullPath } });
+  } else {
+    next();
+  }
+});
+
+export default router;
+```
+
+### Pinia 集成
+
+创建 `src/stores/auth.js`：
+
+```javascript
+import { defineStore } from "pinia";
+import { pb } from "@/lib/pocketbase";
+
+export const useAuthStore = defineStore("auth", {
+  state: () => ({
+    user: null,
+    token: pb.authStore.token,
+  }),
+
+  getters: {
+    isAuthenticated: (state) => !!state.token,
+    userRole: (state) => state.user?.role || "guest",
+  },
+
+  actions: {
+    init() {
+      this.user = pb.authStore.model;
+      this.token = pb.authStore.token;
+
+      pb.authStore.onChange((token, model) => {
+        this.token = token;
+        this.user = model;
+      });
+    },
+
+    async login(email, password) {
+      const authData = await pb
+        .collection("users")
+        .authWithPassword(email, password);
+      this.user = authData.record;
+      this.token = authData.token;
+      return authData;
+    },
+
+    async register(data) {
+      const record = await pb.collection("users").create(data);
+      return record;
+    },
+
+    logout() {
+      pb.authStore.clear();
+      this.user = null;
+      this.token = "";
+    },
+
+    async refresh() {
+      const authData = await pb.collection("users").authRefresh();
+      this.user = authData.record;
+      this.token = authData.token;
+    },
+  },
+});
+```
+
+## Vue 2 集成
+
+### 基础配置
+
+```javascript
+// src/lib/pocketbase.js
+import PocketBase from "pocketbase";
+
+export const pb = new PocketBase(
+  process.env.VUE_APP_POCKETBASE_URL || "http://127.0.0.1:8090",
+);
+
+// 恢复认证状态
+pb.authStore.loadFromCookie(document.cookie);
+
+// 保存认证状态
+pb.authStore.onChange((token, model) => {
+  document.cookie = pb.authStore.exportToCookie({ httpOnly: false });
+});
+
+export default pb;
+```
+
+### Plugin 方式
+
+```javascript
+// src/plugins/pocketbase.js
+import { pb } from "@/lib/pocketbase";
+
+export default {
+  install(Vue) {
+    Vue.prototype.$pb = pb;
+    Vue.$pb = pb;
+  },
+};
+```
+
+```javascript
+// main.js
+import PocketBasePlugin from "./plugins/pocketbase";
+
+Vue.use(PocketBasePlugin);
+```
+
+### 组件中使用
+
+```vue
+<template>
+  <div>
+    <div v-if="$pb.authStore.isValid">
+      <p>Welcome, {{ $pb.authStore.model.email }}</p>
+    </div>
+  </div>
+</template>
+
+<script>
+export default {
+  data() {
+    return {
+      posts: [],
+    };
+  },
+  async mounted() {
+    try {
+      const result = await this.$pb.collection("posts").getList(1, 20);
+      this.posts = result.items;
+    } catch (err) {
+      console.error("Failed to load posts:", err);
+    }
+  },
+  methods: {
+    async login() {
+      try {
+        await this.$pb
+          .collection("users")
+          .authWithPassword(this.email, this.password);
+        this.$router.push("/dashboard");
+      } catch (err) {
+        this.error = err.message;
+      }
+    },
+  },
+};
+</script>
+```
+
+## 文件上传
+
+### 单文件上传
+
+```vue
+<script setup>
+import { ref } from "vue";
+import { pb } from "@/lib/pocketbase";
+
+const uploading = ref(false);
+const progress = ref(0);
+const fileInput = ref(null);
+
+async function uploadFile() {
+  const file = fileInput.value.files[0];
+  if (!file) return;
+
+  uploading.value = true;
+  progress.value = 0;
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("title", "Uploaded file");
+
+  try {
+    const record = await pb.collection("files").create(formData);
+    console.log("Uploaded:", record);
+  } catch (err) {
+    console.error("Upload failed:", err);
+  } finally {
+    uploading.value = false;
+  }
+}
+</script>
+
+<template>
+  <div>
+    <input ref="fileInput" type="file" @change="uploadFile" />
+    <p v-if="uploading">Uploading... {{ progress }}%</p>
+  </div>
+</template>
+```
+
+### 带进度的上传
+
+```vue
+<script setup>
+import { ref } from "vue";
+import { pb } from "@/lib/pocketbase";
+
+const uploading = ref(false);
+const progress = ref(0);
+
+function uploadWithProgress(file) {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const xhr = new XMLHttpRequest();
+
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable) {
+        progress.value = Math.round((e.loaded / e.total) * 100);
+      }
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status === 200) {
+        resolve(JSON.parse(xhr.responseText));
+      } else {
+        reject(new Error(xhr.statusText));
+      }
+    });
+
+    xhr.addEventListener("error", () => reject(new Error("Upload failed")));
+    xhr.addEventListener("abort", () => reject(new Error("Upload aborted")));
+
+    xhr.open("POST", `${pb.baseUrl}/api/collections/uploads/records`);
+    xhr.setRequestHeader("Authorization", `Bearer ${pb.authStore.token}`);
+    xhr.send(formData);
+  });
+}
+</script>
+```
+
+## 实时功能
+
+### 全局订阅
+
+```javascript
+// src/composables/useRealtime.js
+import { pb } from "@/lib/pocketbase";
+import { onUnmounted } from "vue";
+
+export function useRealtime() {
+  const subscriptions = new Map();
+
+  function subscribe(collection, callback) {
+    const sub = pb.collection(collection).subscribe("*", callback);
+    subscriptions.set(collection, sub);
+  }
+
+  function unsubscribe(collection) {
+    if (collection) {
+      const sub = subscriptions.get(collection);
+      sub?.unsubscribe();
+      subscriptions.delete(collection);
+    } else {
+      subscriptions.forEach((sub) => sub.unsubscribe());
+      subscriptions.clear();
+    }
+  }
+
+  onUnmounted(() => {
+    unsubscribe();
+  });
+
+  return {
+    subscribe,
+    unsubscribe,
+  };
+}
+```
+
+### 通知组件
+
+```vue
+<script setup>
+import { ref, onMounted } from "vue";
+import { pb } from "@/lib/pocketbase";
+import { useRealtime } from "@/composables/useRealtime";
+
+const notifications = ref([]);
+const { subscribe } = useRealtime();
+
+onMounted(() => {
+  if (pb.authStore.isValid) {
+    subscribe("notifications", (e) => {
+      if (e.action === "create" && e.record.userId === pb.authStore.model.id) {
+        notifications.value.unshift(e.record);
+        // 显示通知
+        showNotification(e.record);
+      }
+    });
+  }
+});
+
+function showNotification(notification) {
+  // 使用 Element Plus / Naive UI 等显示通知
+  console.log("New notification:", notification);
+}
+</script>
+
+<template>
+  <div>
+    <div v-for="n in notifications" :key="n.id" class="notification">
+      {{ n.message }}
+    </div>
+  </div>
+</template>
+```
+
+## 最佳实践
+
+1. **使用 Composables**：将 PocketBase 逻辑封装到 composables 中，便于复用
+2. **错误处理**：统一处理 API 错误，提供友好的用户提示
+3. **加载状态**：为所有异步操作提供加载状态
+4. **取消订阅**：组件卸载时取消实时订阅
+5. **Token 刷新**：在请求失败时尝试刷新 token

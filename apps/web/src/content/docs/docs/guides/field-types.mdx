@@ -1,0 +1,737 @@
+---
+title: 字段类型参考
+description: 完整的 PocketBase 字段类型参考，包含配置选项和使用场景
+---
+
+PocketBase 提供了丰富的字段类型来构建你的数据模型。每个字段类型都有特定的配置选项和用途。
+
+## 基础类型
+
+### text
+
+单行文本字段，适合短文本内容。
+
+**配置选项：**
+
+| 选项       | 类型   | 默认值 | 说明           |
+| ---------- | ------ | ------ | -------------- |
+| `required` | bool   | false  | 是否必填       |
+| `min`      | number | -      | 最小字符数     |
+| `max`      | number | -      | 最大字符数     |
+| `pattern`  | string | -      | 正则表达式验证 |
+| `default`  | string | -      | 默认值         |
+
+**示例：**
+
+```javascript
+{
+  "name": "username",
+  "type": "text",
+  "required": true,
+  "options": {
+    "min": 3,
+    "max": 30,
+    "pattern": "^[a-zA-Z0-9_]+$"
+  }
+}
+```
+
+**使用场景：** 用户名、标题、标签、短描述
+
+---
+
+### editor
+
+富文本编辑器字段，存储 HTML 内容。
+
+**配置选项：**
+
+| 选项       | 类型 | 默认值 | 说明     |
+| ---------- | ---- | ------ | -------- |
+| `required` | bool | false  | 是否必填 |
+
+**示例：**
+
+```javascript
+{
+  "name": "content",
+  "type": "editor",
+  "required": true
+}
+```
+
+**使用场景：** 文章内容、页面内容、富文本描述
+
+**注意：** editor 字段存储的是原始 HTML，使用时注意 XSS 防护。
+
+---
+
+### number
+
+数字字段，支持整数和小数。
+
+**配置选项：**
+
+| 选项        | 类型   | 默认值 | 说明               |
+| ----------- | ------ | ------ | ------------------ |
+| `required`  | bool   | false  | 是否必填           |
+| `min`       | number | -      | 最小值             |
+| `max`       | number | -      | 最大值             |
+| `default`   | number | -      | 默认值             |
+| `noDecimal` | bool   | false  | 禁用小数（仅整数） |
+
+**示例：**
+
+```javascript
+{
+  "name": "price",
+  "type": "number",
+  "required": true,
+  "options": {
+    "min": 0,
+    "max": 999999.99,
+    "default": 0,
+    "noDecimal": false
+  }
+}
+```
+
+**使用场景：** 价格、数量、评分、排序权重、库存
+
+---
+
+### date
+
+日期时间字段，存储 ISO 8601 格式字符串。
+
+**配置选项：**
+
+| 选项       | 类型   | 默认值 | 说明              |
+| ---------- | ------ | ------ | ----------------- |
+| `required` | bool   | false  | 是否必填          |
+| `default`  | string | -      | 默认值 (如 "now") |
+| `min`      | string | -      | 最小日期          |
+| `max`      | string | -      | 最大日期          |
+
+**特殊默认值：**
+
+- `"now"` - 当前时间戳
+
+**示例：**
+
+```javascript
+{
+  "name": "publishedAt",
+  "type": "date",
+  "options": {
+    "default": "now"
+  }
+}
+
+{
+  "name": "birthday",
+  "type": "date",
+  "options": {
+    "max": "now"
+  }
+}
+```
+
+**使用场景：** 发布时间、过期时间、生日、预约时间
+
+---
+
+### bool
+
+布尔值字段，true/false。
+
+**配置选项：**
+
+| 选项      | 类型 | 默认值 | 说明   |
+| --------- | ---- | ------ | ------ |
+| `default` | bool | false  | 默认值 |
+
+**示例：**
+
+```javascript
+{
+  "name": "featured",
+  "type": "bool",
+  "options": {
+    "default": false
+  }
+}
+```
+
+**使用场景：** 是否推荐、是否启用、开关状态、确认标志
+
+---
+
+### email
+
+邮箱字段，自动验证格式。
+
+**配置选项：**
+
+| 选项       | 类型 | 默认值 | 说明     |
+| ---------- | ---- | ------ | -------- |
+| `required` | bool | false  | 是否必填 |
+
+**示例：**
+
+```javascript
+{
+  "name": "contactEmail",
+  "type": "email"
+}
+```
+
+**使用场景：** 联系邮箱、备用邮箱
+
+---
+
+### url
+
+URL 字段，自动验证格式。
+
+**配置选项：**
+
+| 选项       | 类型 | 默认值 | 说明     |
+| ---------- | ---- | ------ | -------- |
+| `required` | bool | false  | 是否必填 |
+
+**示例：**
+
+```javascript
+{
+  "name": "website",
+  "type": "url"
+}
+```
+
+**使用场景：** 网站链接、社交媒体链接
+
+---
+
+### password
+
+密码字段，自动加密存储（仅 Auth Collection）。
+
+**配置选项：**
+
+| 选项       | 类型   | 默认值 | 说明     |
+| ---------- | ------ | ------ | -------- |
+| `required` | bool   | false  | 是否必填 |
+| `min`      | number | 8      | 最小长度 |
+| `max`      | number | -      | 最大长度 |
+
+**示例：**
+
+```javascript
+{
+  "name": "password",
+  "type": "password",
+  "required": true,
+  "options": {
+    "min": 8
+  }
+}
+```
+
+**注意：** password 字段只能在 Auth Collection 中使用，存储的是加密后的哈希值。
+
+---
+
+### autocomplete
+
+自动提示字段（已废弃，使用 select 替代）。
+
+---
+
+## 选择类型
+
+### select
+
+单选/多选下拉框。
+
+**配置选项：**
+
+| 选项        | 类型     | 默认值 | 说明                      |
+| ----------- | -------- | ------ | ------------------------- |
+| `required`  | bool     | false  | 是否必填                  |
+| `values`    | string[] | -      | 可选值列表                |
+| `default`   | string   | -      | 默认值                    |
+| `maxSelect` | number   | 1      | 最大选择数量（null=多选） |
+
+**单选示例：**
+
+```javascript
+{
+  "name": "status",
+  "type": "select",
+  "required": true,
+  "options": {
+    "values": ["draft", "published", "archived"],
+    "default": "draft",
+    "maxSelect": 1
+  }
+}
+```
+
+**多选示例：**
+
+```javascript
+{
+  "name": "categories",
+  "type": "select",
+  "options": {
+    "values": ["tech", "life", "design", "business"],
+    "maxSelect": 3
+  }
+}
+```
+
+**使用场景：** 状态、分类、标签、优先级
+
+---
+
+## 关系类型
+
+### relation
+
+关联其他集合的记录。
+
+**配置选项：**
+
+| 选项            | 类型   | 默认值 | 说明                           |
+| --------------- | ------ | ------ | ------------------------------ |
+| `required`      | bool   | false  | 是否必填                       |
+| `collectionId`  | string | -      | 关联的集合 ID                  |
+| `cascadeDelete` | bool   | false  | 删除记录时是否同时删除关联记录 |
+| `minSelect`     | number | -      | 最少选择数量                   |
+| `maxSelect`     | number | 1      | 最多选择数量（null=无限制）    |
+
+**一对一关系：**
+
+```javascript
+{
+  "name": "profile",
+  "type": "relation",
+  "options": {
+    "collectionId": "profiles_id",
+    "maxSelect": 1,
+    "minSelect": 1
+  }
+}
+```
+
+**一对多关系：**
+
+```javascript
+// Post 集合
+{
+  "name": "category",
+  "type": "relation",
+  "options": {
+    "collectionId": "categories_id",
+    "maxSelect": 1
+  }
+}
+
+// Category 集合（反向关联）
+{
+  "name": "posts",
+  "type": "relation",
+  "options": {
+    "collectionId": "posts_id",
+    "maxSelect": null
+  }
+}
+```
+
+**多对多关系：**
+
+```javascript
+{
+  "name": "tags",
+  "type": "relation",
+  "options": {
+    "collectionId": "tags_id",
+    "maxSelect": null
+  }
+}
+```
+
+**自引用关系：**
+
+```javascript
+// 评论回复评论
+{
+  "name": "parent",
+  "type": "relation",
+  "options": {
+    "collectionId": "comments_id", // 当前集合的 ID
+    "maxSelect": 1
+  }
+}
+```
+
+**级联删除：**
+
+```javascript
+{
+  "name": "comments",
+  "type": "relation",
+  "options": {
+    "collectionId": "comments_id",
+    "cascadeDelete": true // 删除文章时同时删除评论
+  }
+}
+```
+
+**使用场景：** 外键、分类标签、关联数据
+
+---
+
+## 文件类型
+
+### file
+
+文件上传字段。
+
+**配置选项：**
+
+| 选项        | 类型     | 默认值  | 说明                           |
+| ----------- | -------- | ------- | ------------------------------ |
+| `required`  | bool     | false   | 是否必填                       |
+| `maxSelect` | number   | 1       | 最大文件数量（null=无限制）    |
+| `maxSize`   | number   | 5242880 | 单文件最大字节数（默认5MB）    |
+| `mimeTypes` | string[] | \*      | 允许的 MIME 类型列表           |
+| `thumbs`    | string[] | -       | 缩略图尺寸列表（如 "200x200"） |
+| `protected` | bool     | false   | 是否需要鉴权才能访问           |
+
+**单图片上传：**
+
+```javascript
+{
+  "name": "avatar",
+  "type": "file",
+  "options": {
+    "maxSelect": 1,
+    "maxSize": 5242880,
+    "mimeTypes": ["image/jpeg", "image/png", "image/webp"],
+    "thumbs": ["200x200", "400x400"],
+    "protected": false
+  }
+}
+```
+
+**多文件上传：**
+
+```javascript
+{
+  "name": "attachments",
+  "type": "file",
+  "options": {
+    "maxSelect": 10,
+    "maxSize": 10485760,
+    "mimeTypes": [
+      "image/*",
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ],
+    "protected": true
+  }
+}
+```
+
+**视频上传：**
+
+```javascript
+{
+  "name": "video",
+  "type": "file",
+  "options": {
+    "maxSelect": 1,
+    "maxSize": 104857600,
+    "mimeTypes": ["video/mp4", "video/webm"],
+    "protected": false
+  }
+}
+```
+
+**常用 MIME 类型：**
+
+| 类型         | MIME 类型                                                               |
+| ------------ | ----------------------------------------------------------------------- |
+| JPEG 图片    | image/jpeg                                                              |
+| PNG 图片     | image/png                                                               |
+| WebP 图片    | image/webp                                                              |
+| GIF 图片     | image/gif                                                               |
+| SVG 图片     | image/svg+xml                                                           |
+| PDF 文档     | application/pdf                                                         |
+| Word 文档    | application/msword                                                      |
+| Word 文档新  | application/vnd.openxmlformats-officedocument.wordprocessingml.document |
+| Excel 表格   | application/vnd.ms-excel                                                |
+| Excel 表格新 | application/vnd.openxmlformats-officedocument.spreadsheetml.sheet       |
+| 所有图片     | image/\*                                                                |
+| 所有视频     | video/\*                                                                |
+
+**使用场景：** 头像、封面图、附件、文档、视频
+
+---
+
+## JSON 类型
+
+### json
+
+存储 JSON 数据，适合灵活的结构。
+
+**配置选项：**
+
+| 选项       | 类型 | 默认值 | 说明     |
+| ---------- | ---- | ------ | -------- |
+| `required` | bool | false  | 是否必填 |
+
+**示例：**
+
+```javascript
+{
+  "name": "metadata",
+  "type": "json",
+  "options": {}
+}
+```
+
+**存储的数据示例：**
+
+```json
+{
+  "metadata": {
+    "seo": {
+      "title": "页面标题",
+      "description": "页面描述"
+    },
+    "custom": {
+      "theme": "dark",
+      "fontSize": 16
+    }
+  }
+}
+```
+
+**使用场景：**
+
+- 用户偏好设置
+- 动态配置
+- 扩展属性
+- 第三方数据
+- SEO 元信息
+
+**注意：** JSON 字段不能用于查询过滤中的深层属性。
+
+---
+
+## 字段通用属性
+
+所有字段类型都支持以下通用配置：
+
+### required
+
+是否为必填字段。
+
+```javascript
+{
+  "name": "title",
+  "type": "text",
+  "required": true
+}
+```
+
+### hidden
+
+在 API 响应中隐藏此字段。
+
+```javascript
+{
+  "name": "secretKey",
+  "type": "text",
+  "hidden": true,
+  "options": {}
+}
+```
+
+**注意：** hidden 字段不会出现在 API 响应中，但仍可通过 SDK 访问（需要 expand）。
+
+### presentable
+
+在 Admin UI 的列表视图中显示此字段。
+
+```javascript
+{
+  "name": "email",
+  "type": "email",
+  "presentable": true
+}
+```
+
+---
+
+## 字段验证
+
+### 客户端验证
+
+使用 HTML5 验证：
+
+```html
+<input
+  type="text"
+  required
+  minlength="3"
+  maxlength="30"
+  pattern="^[a-zA-Z0-9_]+$"
+/>
+```
+
+### 服务端验证
+
+在 Hooks 中验证：
+
+```javascript
+onRecordCreateRequest((e) => {
+  const title = e.record.get("title");
+  if (!title || title.length < 10) {
+    throw new BadRequestError("Title must be at least 10 characters");
+  }
+});
+```
+
+### 正则表达式示例
+
+```javascript
+// 用户名：字母数字下划线，3-30字符
+"^[a-zA-Z0-9_]{3,30}$";
+
+// 手机号（中国）
+"^1[3-9]\\d{9}$";
+
+// IP 地址
+"^((25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.){3}(25[0-5]|2[0-4]\\d|[01]?\\d\\d?)$";
+
+// Slug：小写字母数字连字符
+"^[a-z0-9-]+$";
+
+// 颜色代码（HEX）
+"^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$";
+```
+
+---
+
+## 最佳实践
+
+### 字段命名
+
+- 使用 camelCase 命名：`firstName`, `lastName`
+- 布尔值使用 is/has 前缀：`isActive`, `hasVerified`
+- 日期使用 At 后缀：`createdAt`, `publishedAt`
+- ID 引用以 Id 结尾：`authorId`, `categoryId`
+
+### 字段顺序
+
+在集合设计时，按以下顺序排列字段：
+
+1. 系统字段（id, created, updated）
+2. 核心标识字段（name, title, slug）
+3. 内容字段（content, description）
+4. 关系字段（author, category）
+5. 状态字段（status, isActive）
+6. 元数据字段（metadata, settings）
+
+### 默认值使用
+
+为字段设置合理的默认值：
+
+```javascript
+{
+  "name": "status",
+  "type": "select",
+  "options": {
+    "values": ["draft", "published"],
+    "default": "draft"
+  }
+}
+
+{
+  "name": "views",
+  "type": "number",
+  "options": {
+    "default": 0
+  }
+}
+
+{
+  "name": "publishedAt",
+  "type": "date",
+  "options": {
+    "default": "now"
+  }
+}
+```
+
+### 索引建议
+
+为以下字段创建索引：
+
+- 频繁过滤的字段
+- 外键字段
+- 用于排序的字段
+- 唯一性约束字段
+
+---
+
+## 常见问题
+
+### Q: text 和 editor 有什么区别？
+
+- **text**: 单行文本，适合标题、名称等短内容
+- **editor**: 多行富文本，存储 HTML，适合文章内容等长内容
+
+### Q: 如何实现枚举值？
+
+使用 select 类型并设置 values：
+
+```javascript
+{
+  "name": "priority",
+  "type": "select",
+  "options": {
+    "values": ["low", "medium", "high", "urgent"],
+    "default": "medium"
+  }
+}
+```
+
+### Q: 如何存储数组？
+
+使用多选 select 或 relation：
+
+```javascript
+// 简单选项数组
+{
+  "name": "tags",
+  "type": "select",
+  "options": {
+    "values": ["a", "b", "c"],
+    "maxSelect": null
+  }
+}
+```
+
+### Q: 如何实现外键？
+
+使用 relation 类型关联其他集合。
+
+### Q: json 字段可以查询吗？
+
+可以查询顶层属性，但不能查询深层嵌套属性。复杂查询建议使用关系。

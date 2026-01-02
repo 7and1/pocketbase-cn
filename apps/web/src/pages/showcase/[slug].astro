@@ -1,0 +1,128 @@
+---
+export const prerender = false;
+
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { POCKETBASE_URL } from "@/lib/constants/config";
+import { sanitizeRichHtml } from "@/lib/utils/sanitize";
+import VoteButton from "@/components/showcase/VoteButton";
+import CommentsThread from "@/components/comments/CommentsThread";
+import { pocketbaseFileUrl } from "@/lib/utils/fileUrl";
+
+const { slug } = Astro.params;
+if (!slug) return Astro.redirect("/showcase");
+
+const res = await fetch(`${POCKETBASE_URL}/api/showcase/${encodeURIComponent(slug)}`, {
+  headers: { Accept: "application/json" }
+});
+
+if (!res.ok) return Astro.redirect("/showcase");
+
+const json = await res.json();
+const item = json?.data;
+
+const contentHtml = sanitizeRichHtml(String(item?.content || ""));
+const thumbnailUrl = item?.thumbnail ? pocketbaseFileUrl("showcase", String(item?.id || ""), String(item.thumbnail), { thumb: "640x480" }) : "";
+const screenshots = Array.isArray(item?.screenshots) ? item.screenshots : [];
+
+// CreativeWork schema data
+const showcaseSchemaData = {
+  name: item?.title,
+  description: item?.description,
+  authorName: item?.submitter_name || "PocketBase Community",
+  url: item?.url,
+  tags: item?.tags,
+  category: item?.category
+};
+---
+
+<BaseLayout
+  title={`${item?.title || slug} - 案例 - PocketBase.cn`}
+  description={item?.description || ""}
+  schemaType="CreativeWork"
+  schemaData={showcaseSchemaData}
+>
+  <div class="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+    <div class="min-w-0">
+      <h1 class="text-2xl font-semibold tracking-tight">{item?.title}</h1>
+      <p class="mt-2 text-neutral-700 dark:text-neutral-300">{item?.description}</p>
+      <div class="mt-4 flex flex-wrap gap-2 text-sm">
+        {item?.category ? (
+          <span class="rounded bg-neutral-100 px-2 py-1 dark:bg-neutral-800">{item.category}</span>
+        ) : null}
+        {Array.isArray(item?.tags)
+          ? item.tags.slice(0, 8).map((t) => (
+              <span class="rounded bg-neutral-100 px-2 py-1 dark:bg-neutral-800">{t}</span>
+            ))
+          : null}
+      </div>
+    </div>
+
+    <div class="w-full md:w-64">
+      <div class="rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
+        <div class="flex items-center justify-between">
+          <div class="text-sm text-neutral-600 dark:text-neutral-400">Votes</div>
+          <div class="text-lg font-semibold">{item?.votes ?? 0}</div>
+        </div>
+        <div class="mt-2 flex items-center justify-between">
+          <div class="text-sm text-neutral-600 dark:text-neutral-400">Views</div>
+          <div class="text-lg font-semibold">{item?.views ?? 0}</div>
+        </div>
+        <div class="mt-4">
+          <VoteButton slug={String(slug)} client:load />
+        </div>
+        {item?.url ? (
+          <a
+            class="mt-3 block rounded-md border border-neutral-200 px-3 py-2 text-center text-sm font-medium hover:bg-neutral-50 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:border-neutral-800 dark:hover:bg-neutral-900"
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            打开项目
+          </a>
+        ) : null}
+      </div>
+    </div>
+  </div>
+
+  {thumbnailUrl ? (
+    <section class="mt-8">
+      <img
+        src={thumbnailUrl}
+        alt={`${item?.title || slug} 预览图`}
+        class="aspect-video w-full rounded-xl border border-neutral-200 object-cover dark:border-neutral-800"
+        loading="lazy"
+        width={1280}
+        height={720}
+      />
+    </section>
+  ) : null}
+
+  <section class="mt-10">
+    <h2 class="text-lg font-semibold">介绍</h2>
+    <div class="prose mt-4 max-w-none dark:prose-invert">
+      <Fragment set:html={contentHtml} />
+    </div>
+  </section>
+
+  {Array.isArray(screenshots) && screenshots.length ? (
+    <section class="mt-10">
+      <h2 class="text-lg font-semibold">截图</h2>
+      <div class="mt-4 grid gap-3 md:grid-cols-2">
+        {screenshots.map((f, index) => (
+          <img
+            src={pocketbaseFileUrl("showcase", String(item?.id || ""), String(f), { thumb: "640x480" })}
+            alt={`${item?.title || slug} 截图 ${index + 1}`}
+            class="aspect-video w-full rounded-lg border border-neutral-200 object-cover dark:border-neutral-800"
+            loading="lazy"
+            width={640}
+            height={480}
+          />
+        ))}
+      </div>
+    </section>
+  ) : null}
+
+  <section class="mt-10">
+    <CommentsThread showcaseSlug={String(slug)} client:load />
+  </section>
+</BaseLayout>

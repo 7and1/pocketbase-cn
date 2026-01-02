@@ -1,0 +1,570 @@
+---
+title: "PocketBase vs Supabase：深度对比分析"
+description: "从架构、性能、成本、开发体验等多个维度，全面对比 PocketBase 和 Supabase 两大开源后端平台，帮助你选择最适合的技术栈。"
+publishDate: 2024-12-15
+category: "技术对比"
+tags: ["Supabase", "对比分析", "后端选择", "架构设计"]
+author: "PocketBase.cn"
+featured: true
+---
+
+## 概述
+
+PocketBase 和 Supabase 都是为开发者提供开箱即用的后端解决方案，但它们的设计理念和技术架构有显著差异。本文将从多个维度进行深入对比，帮助你做出明智的技术选择。
+
+## 核心差异概览
+
+| 特性         | PocketBase         | Supabase                         |
+| ------------ | ------------------ | -------------------------------- |
+| **核心架构** | Go + SQLite        | PostgreSQL + 多层服务            |
+| **部署方式** | 单个可执行文件     | Docker Compose / 托管服务        |
+| **数据库**   | 内置 SQLite        | 完整 PostgreSQL                  |
+| **实时功能** | 内置 WebSocket     | PostgreSQL Listen/Notify         |
+| **认证系统** | 内置多种方式       | JWT + GoTrue                     |
+| **文件存储** | 本地存储           | S3 兼容存储                      |
+| **Admin UI** | 内置               | Dashboard（托管版）              |
+| **扩展能力** | Go 插件 / JS Hooks | PostgreSQL 扩展 / Edge Functions |
+| **资源占用** | 极低（~15MB）      | 较高（需要完整数据库）           |
+
+## 架构对比
+
+### PocketBase 架构
+
+PocketBase 采用单体架构设计，所有功能打包在一个 Go 可执行文件中：
+
+```
+pocketbase
+├── SQLite Database (内置)
+├── REST API (自动生成)
+├── WebSocket Server (实时订阅)
+├── Admin UI (嵌入式)
+├── Authentication (多种方式)
+├── File Storage (本地)
+└── Hook System (JS/Go扩展)
+```
+
+**优势：**
+
+- 零依赖部署，下载即用
+- 极低的资源占用
+- 简单的备份（单个 .db 文件）
+- 快速启动（秒级）
+
+**局限：**
+
+- SQLite 并发写入限制
+- 单机部署，原生不支持分布式
+
+### Supabase 架构
+
+Supabase 基于微服务架构，围绕 PostgreSQL 构建：
+
+```
+supabase-project
+├── PostgreSQL (主数据库)
+├── GoTrue (认证服务)
+├── PostgREST (REST API)
+├── Realtime (WebSocket服务)
+├── Storage (文件服务)
+├── Studio (管理界面)
+├── Functions (边缘函数)
+└── PgNet (网络扩展)
+```
+
+**优势：**
+
+- PostgreSQL 的完整功能
+- 原生支持高并发
+- 丰富的数据库扩展
+- 强大的 SQL 能力
+
+**局限：**
+
+- 部署复杂度高
+- 资源占用较大
+- 需要数据库运维知识
+
+## 功能详细对比
+
+### 数据库能力
+
+#### PocketBase (SQLite)
+
+```go
+// 集合定义示例（通过 Admin UI 或配置）
+{
+  "name": "posts",
+  "type": "base",
+  "schema": [
+    { "name": "title", "type": "text", "required": true },
+    { "name": "content", "type": "editor" },
+    { "name": "status", "type": "select", "options": ["draft", "published"] },
+    { "name": "author", "type": "relation", "collection": "users" }
+  ],
+  "listRule": "status = 'published'",
+  "viewRule": "status = 'published'"
+}
+```
+
+**特点：**
+
+- 通过 NoSQL 风格的 API 操作关系型数据
+- 自动生成 REST API
+- 内置关系定义和权限规则
+- 支持索引和唯一约束
+
+**适用场景：**
+
+- 中小型数据集（SQLite 官方建议 < 140TB）
+- 读多写少的场景
+- 单机应用
+
+#### Supabase (PostgreSQL)
+
+```sql
+-- 表定义示例
+CREATE TABLE posts (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  title TEXT NOT NULL,
+  content TEXT,
+  status TEXT DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
+  author_id UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- RLS (Row Level Security) 策略
+ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Published posts are viewable by everyone"
+  ON posts FOR SELECT
+  USING (status = 'published');
+
+CREATE POLICY "Users can insert their own posts"
+  ON posts FOR INSERT
+  WITH CHECK (auth.uid() = author_id);
+```
+
+**特点：**
+
+- 完整 SQL 支持
+- 行级安全策略 (RLS)
+- 丰富的数据类型和扩展
+- 原生 JSON 支持
+- 全文搜索 (pg_trgm)
+
+**适用场景：**
+
+- 大型数据集
+- 复杂查询需求
+- 高并发写入
+
+### 认证系统
+
+#### PocketBase 认证
+
+```javascript
+import PocketBase from "pocketbase";
+
+const pb = new PocketBase("https://api.example.com");
+
+// 邮箱密码注册
+await pb.collection("users").create({
+  email: "user@example.com",
+  password: "secure123",
+  passwordConfirm: "secure123",
+});
+
+// 登录
+await pb.collection("users").authWithPassword("user@example.com", "secure123");
+
+// OAuth 登录
+await pb.collection("users").authWithOAuth2({
+  provider: "google",
+  code: "...",
+  redirectURL: "...",
+});
+```
+
+**支持的认证方式：**
+
+- 邮箱 + 密码
+- OAuth2 (Google, GitHub, Facebook, 等)
+- 匿名用户转正
+- API Token 认证
+- 自定义认证（通过 Hooks）
+
+#### Supabase 认证
+
+```javascript
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(url, key);
+
+// 邮箱密码注册
+const { data, error } = await supabase.auth.signUp({
+  email: "user@example.com",
+  password: "secure123",
+});
+
+// 登录
+const { data, error } = await supabase.auth.signInWithPassword({
+  email: "user@example.com",
+  password: "secure123",
+});
+
+// OAuth 登录
+await supabase.auth.signInWithOAuth({
+  provider: "google",
+});
+```
+
+**支持的认证方式：**
+
+- 邮箱 + 密码
+- 魔法链接（无密码）
+- OAuth (20+ 提供商)
+- 手机号验证
+- SAML SSO（付费版）
+- 自定义认证方案
+
+### 实时功能
+
+#### PocketBase 实时
+
+```javascript
+// 订阅记录变更
+pb.collection("posts").subscribe("*", (e) => {
+  switch (e.action) {
+    case "create":
+      console.log("新文章:", e.record);
+      break;
+    case "update":
+      console.log("文章更新:", e.record);
+      break;
+    case "delete":
+      console.log("文章删除:", e.record);
+      break;
+  }
+});
+
+// 取消订阅
+pb.collection("posts").unsubscribe();
+```
+
+**特点：**
+
+- 基于 WebSocket 的原生实现
+- 支持集合级别的订阅
+- 支持过滤和排序
+- 自动重连
+- 权限规则继承
+
+#### Supabase 实时
+
+```javascript
+// 订阅变更
+const channel = supabase
+  .channel("posts-changes")
+  .on(
+    "postgres_changes",
+    {
+      event: "*",
+      schema: "public",
+      table: "posts",
+      filter: "status=eq.published",
+    },
+    (payload) => {
+      console.log("变更:", payload);
+    },
+  )
+  .subscribe();
+
+// 取消订阅
+supabase.removeChannel(channel);
+```
+
+**特点：**
+
+- 基于 PostgreSQL LISTEN/NOTIFY
+- 支持 PostgreSQL 触发器
+- 广播和 Presence 功能
+- 连接状态管理
+
+## 性能对比
+
+### 资源占用
+
+| 指标     | PocketBase | Supabase (自托管) |
+| -------- | ---------- | ----------------- |
+| 内存占用 | ~15-50MB   | 512MB+ (推荐)     |
+| 磁盘占用 | ~20MB      | 2GB+              |
+| CPU      | 单核即可   | 建议 2 核+        |
+| 启动时间 | &lt;1 秒   | 10-30 秒          |
+
+### 并发性能
+
+**PocketBase (SQLite + WAL 模式):**
+
+- 读并发：无限制
+- 写并发：1 个写事务（WAL 模式支持更多读者）
+- 适用场景：&lt; 1000 写请求/秒
+
+**Supabase (PostgreSQL):**
+
+- 读并发：受连接池限制
+- 写并发：高并发支持
+- 适用场景：高并发写入场景
+
+### 实际性能数据
+
+基于社区测试的参考数据（具体取决于硬件和数据结构）：
+
+| 操作              | PocketBase | Supabase   |
+| ----------------- | ---------- | ---------- |
+| 简单查询          | ~1ms       | ~2-5ms     |
+| 列表查询（100条） | ~5ms       | ~10-20ms   |
+| 关联查询（2层）   | ~10ms      | ~15-30ms   |
+| 写入操作          | ~2ms       | ~5-10ms    |
+| 批量插入（100条） | ~50ms      | ~100-200ms |
+
+## 成本对比
+
+### 自托管成本
+
+**PocketBase:**
+
+```
+最低配置：
+- VPS: 1核/512MB内存 (~$5/月)
+- 带宽: 1TB/月
+- 总计: ~$5/月
+
+推荐配置：
+- VPS: 1核/1GB内存 (~$10/月)
+- 带宽: 2TB/月
+- 总计: ~$10/月
+```
+
+**Supabase:**
+
+```
+最低配置：
+- VPS: 2核/2GB内存 (~$20/月)
+- 数据盘: 40GB SSD
+- 带宽: 2TB/月
+- 总计: ~$25-30/月
+
+推荐配置：
+- VPS: 4核/8GB内存 (~$60/月)
+- 数据盘: 100GB SSD
+- 带宽: 5TB/月
+- 总计: ~$80/月
+```
+
+### 托管服务成本
+
+**PocketBase:**
+
+- 目前官方不提供托管服务
+- 需要自行部署或使用第三方服务
+
+**Supabase Cloud:**
+
+```
+免费层：
+- 500MB 数据库
+- 1GB 文件存储
+- 2GB 出站流量
+- 无限 API 请求
+
+Pro 计划 ($25/月):
+- 8GB 数据库
+- 100GB 文件存储
+- 50GB 出站流量
+
+团队计划 ($599/月):
+- 从 $25 计划升级
+- 每增加 8GB 存储 +$25
+- 每增加 50GB 流量 +$5
+```
+
+## 开发体验
+
+### PocketBase
+
+**优势:**
+
+```bash
+# 30秒启动一个项目
+1. 下载可执行文件
+2. 运行 ./pocketbase serve
+3. 打开 http://localhost:8090/_/
+4. 开始构建！
+```
+
+- 零配置启动
+- 内置 Admin UI，无需额外安装
+- 类型安全的 SDK（TypeScript）
+- 简单的数据迁移（单个 .db 文件）
+- 清晰的 API 设计
+
+**学习曲线:**
+
+- 非常平缓，适合新手
+- 文档简洁，易于查找
+- 社区活跃，响应迅速
+
+### Supabase
+
+**优势:**
+
+```bash
+# 使用 CLI 启动项目
+1. npm install -g supabase
+2. supabase init
+3. supabase start
+4. 开始构建！
+```
+
+- 丰富的 Dashboard
+- SQL 编辑器
+- 自动生成 API 文档
+- 强大的 CLI 工具
+- 本地开发环境完整
+
+**学习曲线:**
+
+- 需要了解 PostgreSQL
+- RLS 策略需要一定学习
+- 配置项较多
+
+## 迁移指南
+
+### 从 Supabase 迁移到 PocketBase
+
+如果由于成本或简化需求考虑迁移：
+
+**1. 数据迁移**
+
+```sql
+-- 导出 Supabase 数据
+pg_dump --data-only -U postgres supabase_db > data.sql
+
+-- 转换为 PocketBase 集合结构
+-- 需要根据数据结构手动定义集合
+```
+
+**2. API 调整**
+
+```javascript
+// Supabase
+const { data } = await supabase
+  .from("posts")
+  .select("*, author(name)")
+  .eq("status", "published")
+  .order("created_at", { ascending: false });
+
+// PocketBase
+const records = await pb.collection("posts").getList(1, 20, {
+  filter: 'status = "published"',
+  sort: "-created",
+  expand: "author",
+});
+```
+
+**3. 认证迁移**
+
+```javascript
+// 需要重新实现认证逻辑
+// 或迁移用户凭证到 PocketBase 的 users 集合
+```
+
+### 从 PocketBase 迁移到 Supabase
+
+如果需要更强的数据库能力：
+
+**1. 数据迁移**
+
+```javascript
+// 导出 PocketBase 数据
+const records = await pb.collection("posts").getFullList();
+
+// 转换并导入到 Supabase
+await supabase.from("posts").insert(records);
+```
+
+**2. 结构转换**
+
+- PocketBase 集合 → PostgreSQL 表
+- 关系字段 → 外键
+- 权限规则 → RLS 策略
+
+## 选择建议
+
+### 选择 PocketBase 的情况
+
+1. **快速原型开发**
+   - 需要快速验证想法
+   - 团队规模小，追求开发效率
+
+2. **资源受限环境**
+   - 预算有限
+   - 部署资源受限（如小型 VPS）
+   - 边缘设备部署
+
+3. **中小型项目**
+   - 用户量 < 10,000
+   - 数据量 < 1GB
+   - 并发写入需求不高
+
+4. **简单部署需求**
+   - 不想处理复杂的运维
+   - 需要简单备份方案
+   - 单机应用场景
+
+5. **Go 生态项目**
+   - 后端使用 Go
+   - 需要扩展核心功能
+
+### 选择 Supabase 的情况
+
+1. **大规模项目**
+   - 预期用户量大
+   - 数据增长快速
+   - 需要高并发写入
+
+2. **复杂查询需求**
+   - 需要复杂 SQL 操作
+   - 需要数据库级别的计算
+   - 需要全文搜索、地理数据等
+
+3. **团队熟悉 PostgreSQL**
+   - 有数据库管理员
+   - 团队熟悉 SQL
+   - 需要数据库级别的优化
+
+4. **企业级需求**
+   - 需要详细的审计日志
+   - 需要 SSO 等企业功能
+   - 需要专业的技术支持
+
+5. **多租户架构**
+   - 需要行级安全隔离
+   - 需要复杂的数据权限控制
+
+## 总结
+
+PocketBase 和 Supabase 都是非常优秀的后端解决方案，选择哪一个主要取决于你的具体需求：
+
+- **追求简单、快速、低成本** → PocketBase
+- **需要强大数据库能力和扩展性** → Supabase
+
+两者并非互斥，你可以在项目初期使用 PocketBase 快速启动，当业务增长到一定程度时再迁移到 Supabase。反之，也可以从 Supabase 开始，简化后迁移到 PocketBase 降低成本。
+
+## 参考资源
+
+- [PocketBase 官方文档](/docs)
+- [PocketBase 下载](/downloads)
+- [Supabase 官方文档](https://supabase.com/docs)
+- [生产部署指南](/blog/production-deployment-checklist)

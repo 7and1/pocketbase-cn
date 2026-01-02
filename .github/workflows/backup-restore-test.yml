@@ -1,0 +1,193 @@
+name: Backup Restore Test
+
+on:
+  schedule:
+    # Weekly backup restore test on Sundays at 3 AM UTC
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to test (production/staging)"
+        required: false
+        default: "production"
+        type: choice
+        options:
+          - production
+          - staging
+      backup_date:
+        description: "Backup date to restore (YYYY/MM/DD)"
+        required: false
+        default: ""
+
+jobs:
+  test-backup-restore:
+    name: Test Backup Restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: staging
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download latest backup from R2
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BACKUP_BUCKET }}
+        run: |
+          # Install rclone
+          curl -sSL https://rclone.org/install.sh | sudo bash
+
+          # Configure rclone for R2
+          rclone config create r2-backup s3 \
+            provider Cloudflare \
+            access_key_id "$R2_ACCESS_KEY_ID" \
+            secret_access_key "$R2_SECRET_ACCESS_KEY" \
+            endpoint "$R2_ENDPOINT" \
+            region auto
+
+          # Determine backup path
+          ENV="${{ github.event.inputs.environment || 'production' }}"
+          if [ -n "${{ inputs.backup_date }}" ]; then
+            BACKUP_PATH="${{ inputs.backup_date }}"
+          else
+            # Get latest backup
+            BACKUP_PATH=$(rclone lsf r2-backup:"$R2_BUCKET/$ENV/" --format "tp" | tail -1 | cut -d'/' -f1-3)
+          fi
+
+          echo "Backup path: $BACKUP_PATH"
+          echo "BACKUP_PATH=$BACKUP_PATH" >> $GITHUB_ENV
+
+          # Download backup
+          mkdir -p /tmp/backup_test
+          rclone copy r2-backup:"$R2_BUCKET/$ENV/$BACKUP_PATH/" /tmp/backup_test/
+
+          # List downloaded files
+          ls -lh /tmp/backup_test/
+
+      - name: Validate backup archive
+        run: |
+          BACKUP_FILE=$(find /tmp/backup_test -name "*.tar.gz" | head -1)
+          echo "Validating: $BACKUP_FILE"
+
+          # Test archive integrity
+          if ! tar -tzf "$BACKUP_FILE" > /dev/null; then
+            echo "ERROR: Backup archive is corrupted"
+            exit 1
+          fi
+
+          echo "Backup archive is valid"
+          tar -tzf "$BACKUP_FILE" | head -20
+
+      - name: Setup test PocketBase instance
+        run: |
+          # Download PocketBase
+          PB_VERSION="0.23.4"
+          PB_OS="linux"
+          PB_ARCH="amd64"
+
+          ZIP_NAME="pocketbase_${PB_VERSION}_${PB_OS}_${PB_ARCH}.zip"
+          URL="https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/${ZIP_NAME}"
+
+          curl -fsSL "$URL" -o "/tmp/$ZIP_NAME"
+          unzip -q "/tmp/$ZIP_NAME" -d /tmp/pocketbase_test
+          chmod +x /tmp/pocketbase_test/pocketbase
+
+          # Create test directory structure
+          mkdir -p /tmp/pocketbase_test/pb_data
+          mkdir -p /tmp/pocketbase_test/pb_hooks
+          mkdir -p /tmp/pocketbase_test/pb_migrations
+          mkdir -p /tmp/pocketbase_test/pb_public
+
+      - name: Restore backup to test instance
+        run: |
+          BACKUP_FILE=$(find /tmp/backup_test -name "*.tar.gz" | head -1)
+          echo "Restoring: $BACKUP_FILE"
+
+          # Extract backup
+          tar -xzf "$BACKUP_FILE" -C /tmp/pocketbase_test/
+
+          # Verify data files exist
+          if [ ! -f "/tmp/pocketbase_test/pb_data/data.db" ]; then
+            echo "ERROR: data.db not found in backup"
+            exit 1
+          fi
+
+          if [ ! -f "/tmp/pocketbase_test/pb_data/auxiliary.db" ]; then
+            echo "WARNING: auxiliary.db not found in backup"
+          fi
+
+          echo "Backup restored successfully"
+
+          # List restored files
+          ls -la /tmp/pocketbase_test/pb_data/
+
+      - name: Run migrations on restored backup
+        run: |
+          # Checkout hooks and migrations
+          cp -r apps/backend/pb_hooks/* /tmp/pocketbase_test/pb_hooks/
+          cp -r apps/backend/pb_migrations/* /tmp/pocketbase_test/pb_migrations/
+          cp -r apps/backend/pb_public/* /tmp/pocketbase_test/pb_public/ 2>/dev/null || true
+
+          # Run migrations
+          /tmp/pocketbase_test/pocketbase migrate up \
+            --dir /tmp/pocketbase_test/pb_data \
+            --hooksDir /tmp/pocketbase_test/pb_hooks \
+            --migrationsDir /tmp/pocketbase_test/pb_migrations \
+            --publicDir /tmp/pocketbase_test/pb_public
+
+          echo "Migrations applied successfully"
+
+      - name: Start test instance and run smoke tests
+        run: |
+          # Start PocketBase in background
+          /tmp/pocketbase_test/pocketbase serve \
+            --http=127.0.0.1:8091 \
+            --dir /tmp/pocketbase_test/pb_data \
+            --hooksDir /tmp/pocketbase_test/pb_hooks \
+            --migrationsDir /tmp/pocketbase_test/pb_migrations \
+            --publicDir /tmp/pocketbase_test/pb_public &
+
+          PB_PID=$!
+          echo "Started PocketBase with PID: $PB_PID"
+
+          # Wait for startup
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8091/api/live >/dev/null 2>&1; then
+              echo "PocketBase is ready"
+              break
+            fi
+            sleep 1
+          done
+
+          # Run health checks
+          curl -fsS http://127.0.0.1:8091/api/live | jq .
+          curl -fsS http://127.0.0.1:8091/api/ready | jq .
+
+          # Cleanup
+          kill $PB_PID || true
+
+      - name: Cleanup test environment
+        if: always()
+        run: |
+          rm -rf /tmp/pocketbase_test /tmp/backup_test
+
+      - name: Notify success
+        if: success()
+        run: |
+          if [ -n "${{ secrets.ALERT_WEBHOOK_URL }}" ]; then
+            curl -X POST "${{ secrets.ALERT_WEBHOOK_URL }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"text\":\"✅ Backup restore test passed\\nBackup: ${{ env.BACKUP_PATH }}\"}"
+          fi
+
+      - name: Notify failure
+        if: failure()
+        run: |
+          if [ -n "${{ secrets.ALERT_WEBHOOK_URL }}" ]; then
+            curl -X POST "${{ secrets.ALERT_WEBHOOK_URL }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"text\":\"❌ Backup restore test failed\\nBackup: ${{ env.BACKUP_PATH }}\"}"
+          fi

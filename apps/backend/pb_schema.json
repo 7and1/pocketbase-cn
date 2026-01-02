@@ -1,0 +1,1412 @@
+[
+  {
+    "id": "pbc_2111211931",
+    "name": "plugins",
+    "type": "base",
+    "system": false,
+    "listRule": "status = 'approved' || author = @request.auth.id || @request.auth.role ~ 'admin|moderator'",
+    "viewRule": "status = 'approved' || author = @request.auth.id || @request.auth.role ~ 'admin|moderator'",
+    "createRule": "@request.auth.id != ''",
+    "updateRule": "author = @request.auth.id || @request.auth.role ~ 'admin|moderator'",
+    "deleteRule": "@request.auth.role = 'admin'",
+    "fields": [
+      {
+        "type": "autodate",
+        "name": "created",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": false
+      },
+      {
+        "type": "autodate",
+        "name": "updated",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": true
+      },
+      {
+        "type": "relation",
+        "name": "author",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "collectionId": "_pb_users_auth_",
+        "cascadeDelete": false,
+        "minSelect": 0,
+        "maxSelect": 1,
+        "required": true
+      },
+      {
+        "type": "text",
+        "name": "name",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 3,
+        "max": 100,
+        "pattern": "",
+        "autogeneratePattern": "",
+        "required": true,
+        "primaryKey": false
+      },
+      {
+        "type": "text",
+        "name": "slug",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 3,
+        "max": 100,
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+        "autogeneratePattern": "",
+        "required": true,
+        "primaryKey": false
+      },
+      {
+        "type": "text",
+        "name": "description",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 10,
+        "max": 500,
+        "pattern": "",
+        "autogeneratePattern": "",
+        "required": true,
+        "primaryKey": false
+      },
+      {
+        "type": "editor",
+        "name": "readme",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "maxSize": 0,
+        "convertURLs": false,
+        "required": false
+      },
+      {
+        "type": "url",
+        "name": "repository",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "exceptDomains": [],
+        "onlyDomains": ["github.com", "gitee.com"],
+        "required": true
+      },
+      {
+        "type": "url",
+        "name": "homepage",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "exceptDomains": [],
+        "onlyDomains": [],
+        "required": false
+      },
+      {
+        "type": "select",
+        "name": "category",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "values": [
+          "hooks",
+          "auth",
+          "storage",
+          "api",
+          "admin",
+          "integration",
+          "utility",
+          "template",
+          "other"
+        ],
+        "maxSelect": 1,
+        "required": true
+      },
+      {
+        "type": "json",
+        "name": "tags",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "maxSize": 0,
+        "required": false
+      },
+      {
+        "type": "text",
+        "name": "license",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 0,
+        "max": 50,
+        "pattern": "",
+        "autogeneratePattern": "",
+        "required": false,
+        "primaryKey": false
+      },
+      {
+        "type": "file",
+        "name": "icon",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "maxSize": 524288,
+        "maxSelect": 1,
+        "mimeTypes": ["image/png", "image/svg+xml"],
+        "thumbs": ["100x100"],
+        "protected": false,
+        "required": false
+      },
+      {
+        "type": "file",
+        "name": "screenshots",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "maxSize": 2097152,
+        "maxSelect": 5,
+        "mimeTypes": ["image/png", "image/jpeg", "image/webp"],
+        "thumbs": ["320x240", "640x480"],
+        "protected": false,
+        "required": false
+      },
+      {
+        "type": "select",
+        "name": "status",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "values": ["pending", "approved", "rejected", "hidden"],
+        "maxSelect": 1,
+        "required": true
+      },
+      {
+        "type": "bool",
+        "name": "featured",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "required": false
+      }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_plugins_slug` ON `plugins` (`slug`)",
+      "CREATE INDEX `idx_plugins_author` ON `plugins` (`author`)",
+      "CREATE INDEX `idx_plugins_category` ON `plugins` (`category`)",
+      "CREATE INDEX `idx_plugins_status` ON `plugins` (`status`)",
+      "CREATE INDEX `idx_plugins_featured` ON `plugins` (`featured`)",
+      "CREATE INDEX `idx_plugins_status_featured` ON `plugins` (`status`, `featured`)"
+    ]
+  },
+  {
+    "id": "pbc_3612929455",
+    "name": "plugin_versions",
+    "type": "base",
+    "system": false,
+    "listRule": "",
+    "viewRule": "",
+    "createRule": "@request.auth.id != ''",
+    "updateRule": "@request.auth.role ~ 'admin|moderator'",
+    "deleteRule": "@request.auth.role = 'admin'",
+    "fields": [
+      {
+        "type": "autodate",
+        "name": "created",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": false
+      },
+      {
+        "type": "autodate",
+        "name": "updated",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": true
+      },
+      {
+        "type": "relation",
+        "name": "plugin",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "collectionId": "pbc_2111211931",
+        "cascadeDelete": false,
+        "minSelect": 0,
+        "maxSelect": 1,
+        "required": true
+      },
+      {
+        "type": "text",
+        "name": "version",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 1,
+        "max": 32,
+        "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+].+)?$",
+        "autogeneratePattern": "",
+        "required": true,
+        "primaryKey": false
+      },
+      {
+        "type": "editor",
+        "name": "changelog",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "maxSize": 0,
+        "convertURLs": false,
+        "required": false
+      },
+      {
+        "type": "url",
+        "name": "download_url",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "exceptDomains": [],
+        "onlyDomains": [],
+        "required": true
+      },
+      {
+        "type": "text",
+        "name": "pocketbase_version",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 1,
+        "max": 32,
+        "pattern": "",
+        "autogeneratePattern": "",
+        "required": true,
+        "primaryKey": false
+      },
+      {
+        "type": "text",
+        "name": "checksum",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 0,
+        "max": 256,
+        "pattern": "",
+        "autogeneratePattern": "",
+        "required": false,
+        "primaryKey": false
+      },
+      {
+        "type": "number",
+        "name": "file_size",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onlyInt": true,
+        "required": false,
+        "min": 0,
+        "max": null
+      },
+      {
+        "type": "number",
+        "name": "downloads",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onlyInt": true,
+        "required": false,
+        "min": 0,
+        "max": null
+      },
+      {
+        "type": "bool",
+        "name": "prerelease",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "required": false
+      }
+    ],
+    "indexes": [
+      "CREATE INDEX `idx_plugin_versions_plugin` ON `plugin_versions` (`plugin`)",
+      "CREATE UNIQUE INDEX `idx_plugin_versions_plugin_version` ON `plugin_versions` (`plugin`, `version`)"
+    ]
+  },
+  {
+    "id": "pbc_37421934",
+    "name": "plugin_stats",
+    "type": "base",
+    "system": false,
+    "listRule": "",
+    "viewRule": "",
+    "createRule": "@request.auth.role ~ 'admin|moderator'",
+    "updateRule": "@request.auth.role ~ 'admin|moderator'",
+    "deleteRule": "@request.auth.role = 'admin'",
+    "fields": [
+      {
+        "type": "autodate",
+        "name": "created",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": false
+      },
+      {
+        "type": "autodate",
+        "name": "updated",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": true
+      },
+      {
+        "type": "relation",
+        "name": "plugin",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "collectionId": "pbc_2111211931",
+        "cascadeDelete": false,
+        "minSelect": 0,
+        "maxSelect": 1,
+        "required": true
+      },
+      {
+        "type": "number",
+        "name": "downloads_total",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onlyInt": true,
+        "required": false,
+        "min": 0,
+        "max": null
+      },
+      {
+        "type": "number",
+        "name": "downloads_weekly",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onlyInt": true,
+        "required": false,
+        "min": 0,
+        "max": null
+      },
+      {
+        "type": "number",
+        "name": "views_total",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onlyInt": true,
+        "required": false,
+        "min": 0,
+        "max": null
+      },
+      {
+        "type": "number",
+        "name": "views_weekly",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onlyInt": true,
+        "required": false,
+        "min": 0,
+        "max": null
+      },
+      {
+        "type": "number",
+        "name": "stars",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onlyInt": true,
+        "required": false,
+        "min": 0,
+        "max": null
+      }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_plugin_stats_plugin` ON `plugin_stats` (`plugin`)",
+      "CREATE INDEX `idx_plugin_stats_downloads` ON `plugin_stats` (`downloads_total` DESC)",
+      "CREATE INDEX `idx_plugin_stats_stars` ON `plugin_stats` (`stars` DESC)",
+      "CREATE INDEX `idx_plugin_stats_weekly` ON `plugin_stats` (`downloads_weekly` DESC)"
+    ]
+  },
+  {
+    "id": "pbc_1425462473",
+    "name": "showcase",
+    "type": "base",
+    "system": false,
+    "listRule": "status = 'approved' || author = @request.auth.id || @request.auth.role ~ 'admin|moderator'",
+    "viewRule": "status = 'approved' || author = @request.auth.id || @request.auth.role ~ 'admin|moderator'",
+    "createRule": "@request.auth.id != ''",
+    "updateRule": "author = @request.auth.id || @request.auth.role ~ 'admin|moderator'",
+    "deleteRule": "@request.auth.role = 'admin'",
+    "fields": [
+      {
+        "type": "autodate",
+        "name": "created",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": false
+      },
+      {
+        "type": "autodate",
+        "name": "updated",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": true
+      },
+      {
+        "type": "relation",
+        "name": "author",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "collectionId": "_pb_users_auth_",
+        "cascadeDelete": false,
+        "minSelect": 0,
+        "maxSelect": 1,
+        "required": true
+      },
+      {
+        "type": "text",
+        "name": "title",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 3,
+        "max": 100,
+        "pattern": "",
+        "autogeneratePattern": "",
+        "required": true,
+        "primaryKey": false
+      },
+      {
+        "type": "text",
+        "name": "slug",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 3,
+        "max": 140,
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+        "autogeneratePattern": "",
+        "required": true,
+        "primaryKey": false
+      },
+      {
+        "type": "text",
+        "name": "description",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 10,
+        "max": 1000,
+        "pattern": "",
+        "autogeneratePattern": "",
+        "required": true,
+        "primaryKey": false
+      },
+      {
+        "type": "editor",
+        "name": "content",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "maxSize": 0,
+        "convertURLs": false,
+        "required": false
+      },
+      {
+        "type": "url",
+        "name": "url",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "exceptDomains": [],
+        "onlyDomains": [],
+        "required": true
+      },
+      {
+        "type": "url",
+        "name": "repository",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "exceptDomains": [],
+        "onlyDomains": [],
+        "required": false
+      },
+      {
+        "type": "file",
+        "name": "thumbnail",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "maxSize": 2097152,
+        "maxSelect": 1,
+        "mimeTypes": ["image/png", "image/jpeg", "image/webp"],
+        "thumbs": ["320x240", "640x480"],
+        "protected": false,
+        "required": false
+      },
+      {
+        "type": "file",
+        "name": "screenshots",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "maxSize": 5242880,
+        "maxSelect": 5,
+        "mimeTypes": ["image/png", "image/jpeg", "image/webp"],
+        "thumbs": ["320x240", "640x480", "1280x720"],
+        "protected": false,
+        "required": false
+      },
+      {
+        "type": "select",
+        "name": "category",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "values": [
+          "saas",
+          "ecommerce",
+          "cms",
+          "mobile",
+          "desktop",
+          "api",
+          "tool",
+          "game",
+          "other"
+        ],
+        "maxSelect": 1,
+        "required": true
+      },
+      {
+        "type": "json",
+        "name": "tags",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "maxSize": 0,
+        "required": false
+      },
+      {
+        "type": "select",
+        "name": "status",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "values": ["pending", "approved", "rejected", "hidden"],
+        "maxSelect": 1,
+        "required": true
+      },
+      {
+        "type": "bool",
+        "name": "featured",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "required": false
+      },
+      {
+        "type": "number",
+        "name": "views",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onlyInt": true,
+        "required": false,
+        "min": 0,
+        "max": null
+      }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_showcase_slug` ON `showcase` (`slug`)",
+      "CREATE INDEX `idx_showcase_author` ON `showcase` (`author`)",
+      "CREATE INDEX `idx_showcase_category` ON `showcase` (`category`)",
+      "CREATE INDEX `idx_showcase_status` ON `showcase` (`status`)",
+      "CREATE INDEX `idx_showcase_featured` ON `showcase` (`featured`)"
+    ]
+  },
+  {
+    "id": "pbc_470794100",
+    "name": "mirrors",
+    "type": "base",
+    "system": false,
+    "listRule": "",
+    "viewRule": "",
+    "createRule": "@request.auth.role ~ 'admin|moderator'",
+    "updateRule": "@request.auth.role ~ 'admin|moderator'",
+    "deleteRule": "@request.auth.role = 'admin'",
+    "fields": [
+      {
+        "type": "autodate",
+        "name": "created",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": false
+      },
+      {
+        "type": "autodate",
+        "name": "updated",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": true
+      },
+      {
+        "type": "text",
+        "name": "name",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 2,
+        "max": 60,
+        "pattern": "",
+        "autogeneratePattern": "",
+        "required": true,
+        "primaryKey": false
+      },
+      {
+        "type": "url",
+        "name": "base_url",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "exceptDomains": [],
+        "onlyDomains": [],
+        "required": true
+      },
+      {
+        "type": "select",
+        "name": "region",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "values": [
+          "cn-north",
+          "cn-south",
+          "cn-east",
+          "hk",
+          "sg",
+          "us-west",
+          "us-east",
+          "eu"
+        ],
+        "maxSelect": 1,
+        "required": true
+      },
+      {
+        "type": "text",
+        "name": "provider",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 1,
+        "max": 60,
+        "pattern": "",
+        "autogeneratePattern": "",
+        "required": true,
+        "primaryKey": false
+      },
+      {
+        "type": "number",
+        "name": "priority",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onlyInt": true,
+        "required": false,
+        "min": 0,
+        "max": null
+      },
+      {
+        "type": "select",
+        "name": "status",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "values": ["active", "maintenance", "disabled"],
+        "maxSelect": 1,
+        "required": true
+      },
+      {
+        "type": "url",
+        "name": "health_check_url",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "exceptDomains": [],
+        "onlyDomains": [],
+        "required": false
+      },
+      {
+        "type": "date",
+        "name": "last_check",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": "",
+        "max": "",
+        "required": false
+      },
+      {
+        "type": "number",
+        "name": "latency_ms",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onlyInt": true,
+        "required": false,
+        "min": 0,
+        "max": null
+      }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_mirrors_name` ON `mirrors` (`name`)",
+      "CREATE UNIQUE INDEX `idx_mirrors_base_url` ON `mirrors` (`base_url`)",
+      "CREATE INDEX `idx_mirrors_region` ON `mirrors` (`region`)",
+      "CREATE INDEX `idx_mirrors_status` ON `mirrors` (`status`)",
+      "CREATE INDEX `idx_mirrors_priority` ON `mirrors` (`priority`)"
+    ]
+  },
+  {
+    "id": "pbc_2151003480",
+    "name": "newsletter",
+    "type": "base",
+    "system": false,
+    "listRule": "@request.auth.role ~ 'admin|moderator'",
+    "viewRule": "@request.auth.role ~ 'admin|moderator'",
+    "createRule": "",
+    "updateRule": "@request.auth.role ~ 'admin|moderator'",
+    "deleteRule": "@request.auth.role = 'admin'",
+    "fields": [
+      {
+        "type": "autodate",
+        "name": "created",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": false
+      },
+      {
+        "type": "autodate",
+        "name": "updated",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": true
+      },
+      {
+        "type": "email",
+        "name": "email",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "exceptDomains": [],
+        "onlyDomains": [],
+        "required": true
+      },
+      {
+        "type": "select",
+        "name": "status",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "values": ["pending", "confirmed", "unsubscribed"],
+        "maxSelect": 1,
+        "required": true
+      },
+      {
+        "type": "text",
+        "name": "token",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 20,
+        "max": 120,
+        "pattern": "",
+        "autogeneratePattern": "",
+        "required": true,
+        "primaryKey": false
+      },
+      {
+        "type": "autodate",
+        "name": "subscribed_at",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": false
+      },
+      {
+        "type": "date",
+        "name": "confirmed_at",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": "",
+        "max": "",
+        "required": false
+      },
+      {
+        "type": "date",
+        "name": "unsubscribed_at",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": "",
+        "max": "",
+        "required": false
+      },
+      {
+        "type": "text",
+        "name": "source",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 0,
+        "max": 60,
+        "pattern": "",
+        "autogeneratePattern": "",
+        "required": false,
+        "primaryKey": false
+      }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_newsletter_email` ON `newsletter` (`email`)",
+      "CREATE UNIQUE INDEX `idx_newsletter_token` ON `newsletter` (`token`)",
+      "CREATE INDEX `idx_newsletter_status` ON `newsletter` (`status`)"
+    ]
+  },
+  {
+    "id": "pbc_794313261",
+    "name": "downloads",
+    "type": "base",
+    "system": false,
+    "listRule": "",
+    "viewRule": "",
+    "createRule": "@request.auth.role ~ 'admin|moderator'",
+    "updateRule": "@request.auth.role ~ 'admin|moderator'",
+    "deleteRule": "@request.auth.role = 'admin'",
+    "fields": [
+      {
+        "type": "autodate",
+        "name": "created",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": false
+      },
+      {
+        "type": "autodate",
+        "name": "updated",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": true
+      },
+      {
+        "type": "text",
+        "name": "version",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 1,
+        "max": 32,
+        "pattern": "^\\d+\\.\\d+\\.\\d+$",
+        "autogeneratePattern": "",
+        "required": true,
+        "primaryKey": false
+      },
+      {
+        "type": "select",
+        "name": "platform",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "values": ["darwin", "linux", "windows"],
+        "maxSelect": 1,
+        "required": true
+      },
+      {
+        "type": "select",
+        "name": "arch",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "values": ["amd64", "arm64", "386"],
+        "maxSelect": 1,
+        "required": true
+      },
+      {
+        "type": "file",
+        "name": "file",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "maxSize": 262144000,
+        "maxSelect": 1,
+        "mimeTypes": ["application/zip"],
+        "thumbs": [],
+        "protected": false,
+        "required": false
+      },
+      {
+        "type": "url",
+        "name": "url",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "exceptDomains": [],
+        "onlyDomains": [],
+        "required": false
+      },
+      {
+        "type": "text",
+        "name": "checksum",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 0,
+        "max": 256,
+        "pattern": "",
+        "autogeneratePattern": "",
+        "required": false,
+        "primaryKey": false
+      },
+      {
+        "type": "number",
+        "name": "size",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onlyInt": true,
+        "required": false,
+        "min": 0,
+        "max": null
+      },
+      {
+        "type": "bool",
+        "name": "prerelease",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "required": false
+      },
+      {
+        "type": "date",
+        "name": "published_at",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": "",
+        "max": "",
+        "required": false
+      }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_downloads_version_platform_arch` ON `downloads` (`version`, `platform`, `arch`)",
+      "CREATE INDEX `idx_downloads_version` ON `downloads` (`version`)"
+    ]
+  },
+  {
+    "id": "pbc_1607900801",
+    "name": "download_stats",
+    "type": "base",
+    "system": false,
+    "listRule": "",
+    "viewRule": "",
+    "createRule": "@request.auth.role ~ 'admin|moderator'",
+    "updateRule": "@request.auth.role ~ 'admin|moderator'",
+    "deleteRule": "@request.auth.role = 'admin'",
+    "fields": [
+      {
+        "type": "autodate",
+        "name": "created",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": false
+      },
+      {
+        "type": "autodate",
+        "name": "updated",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": true
+      },
+      {
+        "type": "text",
+        "name": "version",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 1,
+        "max": 32,
+        "pattern": "",
+        "autogeneratePattern": "",
+        "required": true,
+        "primaryKey": false
+      },
+      {
+        "type": "select",
+        "name": "platform",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "values": ["darwin", "linux", "windows"],
+        "maxSelect": 1,
+        "required": true
+      },
+      {
+        "type": "select",
+        "name": "arch",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "values": ["amd64", "arm64", "386"],
+        "maxSelect": 1,
+        "required": true
+      },
+      {
+        "type": "number",
+        "name": "count",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onlyInt": true,
+        "required": false,
+        "min": 0,
+        "max": null
+      },
+      {
+        "type": "date",
+        "name": "date",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": "",
+        "max": "",
+        "required": true
+      }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_download_stats_unique` ON `download_stats` (`version`, `platform`, `arch`, `date`)",
+      "CREATE INDEX `idx_download_stats_date` ON `download_stats` (`date` DESC)"
+    ]
+  },
+  {
+    "id": "pbc_1415685352",
+    "name": "plugin_stars",
+    "type": "base",
+    "system": false,
+    "listRule": "@request.auth.id != ''",
+    "viewRule": "@request.auth.id != ''",
+    "createRule": "@request.auth.id != ''",
+    "updateRule": "@request.auth.role ~ 'admin|moderator'",
+    "deleteRule": "@request.auth.id != '' || @request.auth.role ~ 'admin|moderator'",
+    "fields": [
+      {
+        "type": "autodate",
+        "name": "created",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": false
+      },
+      {
+        "type": "relation",
+        "name": "plugin",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "collectionId": "pbc_2111211931",
+        "cascadeDelete": false,
+        "minSelect": 0,
+        "maxSelect": 1,
+        "required": true
+      },
+      {
+        "type": "relation",
+        "name": "user",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "collectionId": "_pb_users_auth_",
+        "cascadeDelete": false,
+        "minSelect": 0,
+        "maxSelect": 1,
+        "required": true
+      }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_plugin_stars_unique` ON `plugin_stars` (`plugin`, `user`)",
+      "CREATE INDEX `idx_plugin_stars_plugin` ON `plugin_stars` (`plugin`)",
+      "CREATE INDEX `idx_plugin_stars_user` ON `plugin_stars` (`user`)"
+    ]
+  },
+  {
+    "id": "pbc_1503252385",
+    "name": "showcase_votes",
+    "type": "base",
+    "system": false,
+    "listRule": "@request.auth.id != ''",
+    "viewRule": "@request.auth.id != ''",
+    "createRule": "@request.auth.id != ''",
+    "updateRule": "@request.auth.role ~ 'admin|moderator'",
+    "deleteRule": "@request.auth.id != '' || @request.auth.role ~ 'admin|moderator'",
+    "fields": [
+      {
+        "type": "autodate",
+        "name": "created",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": false
+      },
+      {
+        "type": "relation",
+        "name": "showcase",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "collectionId": "pbc_1425462473",
+        "cascadeDelete": false,
+        "minSelect": 0,
+        "maxSelect": 1,
+        "required": true
+      },
+      {
+        "type": "relation",
+        "name": "user",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "collectionId": "_pb_users_auth_",
+        "cascadeDelete": false,
+        "minSelect": 0,
+        "maxSelect": 1,
+        "required": true
+      }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_showcase_votes_unique` ON `showcase_votes` (`showcase`, `user`)",
+      "CREATE INDEX `idx_showcase_votes_showcase` ON `showcase_votes` (`showcase`)",
+      "CREATE INDEX `idx_showcase_votes_user` ON `showcase_votes` (`user`)"
+    ]
+  },
+  {
+    "id": "pbc_533777971",
+    "name": "comments",
+    "type": "base",
+    "system": false,
+    "listRule": "status = 'approved' || author = @request.auth.id || @request.auth.role ~ 'admin|moderator'",
+    "viewRule": "status = 'approved' || author = @request.auth.id || @request.auth.role ~ 'admin|moderator'",
+    "createRule": "@request.auth.id != ''",
+    "updateRule": "author = @request.auth.id || @request.auth.role ~ 'admin|moderator'",
+    "deleteRule": "author = @request.auth.id || @request.auth.role ~ 'admin|moderator'",
+    "fields": [
+      {
+        "type": "autodate",
+        "name": "created",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": false
+      },
+      {
+        "type": "autodate",
+        "name": "updated",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": true
+      },
+      {
+        "type": "relation",
+        "name": "author",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "collectionId": "_pb_users_auth_",
+        "cascadeDelete": false,
+        "minSelect": 0,
+        "maxSelect": 1,
+        "required": true
+      },
+      {
+        "type": "relation",
+        "name": "plugin",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "collectionId": "pbc_2111211931",
+        "cascadeDelete": false,
+        "minSelect": 0,
+        "maxSelect": 1,
+        "required": false
+      },
+      {
+        "type": "relation",
+        "name": "showcase",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "collectionId": "pbc_1425462473",
+        "cascadeDelete": false,
+        "minSelect": 0,
+        "maxSelect": 1,
+        "required": false
+      },
+      {
+        "type": "relation",
+        "name": "parent",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "collectionId": "pbc_533777971",
+        "cascadeDelete": false,
+        "minSelect": 0,
+        "maxSelect": 1,
+        "required": false
+      },
+      {
+        "type": "text",
+        "name": "content",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 1,
+        "max": 5000,
+        "pattern": "",
+        "autogeneratePattern": "",
+        "required": true,
+        "primaryKey": false
+      },
+      {
+        "type": "select",
+        "name": "status",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "values": ["pending", "approved", "rejected", "spam"],
+        "maxSelect": 1,
+        "required": true
+      }
+    ],
+    "indexes": [
+      "CREATE INDEX `idx_comments_plugin` ON `comments` (`plugin`)",
+      "CREATE INDEX `idx_comments_showcase` ON `comments` (`showcase`)",
+      "CREATE INDEX `idx_comments_parent` ON `comments` (`parent`)",
+      "CREATE INDEX `idx_comments_status` ON `comments` (`status`)"
+    ]
+  },
+  {
+    "id": "pbc_80030372",
+    "name": "rate_limits",
+    "type": "base",
+    "system": false,
+    "listRule": "@request.auth.role ~ 'admin|moderator'",
+    "viewRule": "@request.auth.role ~ 'admin|moderator'",
+    "createRule": "@request.auth.role ~ 'admin|moderator'",
+    "updateRule": "@request.auth.role ~ 'admin|moderator'",
+    "deleteRule": "@request.auth.role = 'admin'",
+    "fields": [
+      {
+        "type": "autodate",
+        "name": "created",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onCreate": true,
+        "onUpdate": false
+      },
+      {
+        "type": "text",
+        "name": "key",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 1,
+        "max": 200,
+        "pattern": "",
+        "autogeneratePattern": "",
+        "required": true,
+        "primaryKey": false
+      },
+      {
+        "type": "text",
+        "name": "endpoint",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": 1,
+        "max": 200,
+        "pattern": "",
+        "autogeneratePattern": "",
+        "required": true,
+        "primaryKey": false
+      },
+      {
+        "type": "number",
+        "name": "count",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "onlyInt": true,
+        "required": false,
+        "min": 0,
+        "max": null
+      },
+      {
+        "type": "date",
+        "name": "window_start",
+        "system": false,
+        "hidden": false,
+        "presentable": false,
+        "min": "",
+        "max": "",
+        "required": true
+      }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_rate_limits_key_endpoint` ON `rate_limits` (`key`, `endpoint`)",
+      "CREATE INDEX `idx_rate_limits_window_start` ON `rate_limits` (`window_start` DESC)"
+    ]
+  }
+]

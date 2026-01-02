@@ -1,0 +1,21 @@
+{
+  "name": "pocketbase-cn",
+  "private": true,
+  "packageManager": "pnpm@10.17.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "format": "pnpm -r format",
+    "backend:download": "bash apps/backend/scripts/download-pocketbase.sh",
+    "backend:dev": "bash apps/backend/scripts/dev.sh",
+    "backend:migrate": "bash apps/backend/scripts/migrate.sh",
+    "backend:smoke": "bash apps/backend/scripts/smoke.sh",
+    "web:dev": "pnpm -C apps/web dev",
+    "web:og": "pnpm -C apps/web og",
+    "web:build": "pnpm -C apps/web build",
+    "web:smoke": "pnpm -C apps/web smoke:dist",
+    "web:preview": "pnpm -C apps/web preview"
+  }
+}

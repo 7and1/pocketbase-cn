@@ -1,0 +1,93 @@
+---
+title: JS 扩展（P2）
+description: 使用 PocketBase JS hooks 扩展后端：路由、校验、自动化与安全注意事项。
+---
+
+本页对应 SEO 计划中的 **P2：Extending with JS**。本项目的后端扩展主要依赖 JS hooks（JSVM）。
+
+## JS hooks 能做什么
+
+适合：
+
+- **业务校验与策略**：字段默认值、权限收口、反滥用（限流/风控）
+- **自定义 Routes**：BFF 层、组合查询、榜单、统计
+- **自动化/定时任务**：同步 releases、抓取 README、发送通知
+
+不适合：
+
+- 需要复杂依赖的大型服务（建议外置服务或 Go 扩展）
+- 超高并发、重计算（会放大 Goja 的性能与可维护成本）
+
+## 关键限制（必须知道）
+
+- JS 运行在 **Goja（ES5 兼容）**：避免使用现代语法/内置
+- handler 之间不要依赖“共享全局变量”（隔离/重载会踩坑）
+- 外部请求必须设置超时，并配合限流，防止被拖死
+
+## 最佳实践（本项目已采用）
+
+### 1) 把可复用逻辑放到 `pb_hooks/lib/`
+
+例如：
+
+- `apps/backend/pb_hooks/lib/pbcn.js`：`trim/slugify/rateLimitAllow/isStaff` 等工具函数
+- `apps/backend/pb_hooks/lib/release_sync.js`：同步 GitHub releases + 邮件/Webhook 通知
+
+在 handler 内使用：
+
+```js
+var pbcn = require(__hooks + "/lib/pbcn.js");
+```
+
+### 2) 自定义路由使用 `routerAdd(method, path, handler)`
+
+PocketBase 路由 pattern 使用 `{param}`：
+
+```js
+routerAdd("GET", "/api/plugins/{slug}", function (c) {
+  var slug = c.request.pathValue("slug");
+  return c.json(200, { data: { slug: slug } });
+});
+```
+
+在 handler 里：
+
+- 查询参数/JSON body：`c.requestInfo()`（`info.query` / `info.body`）
+- 鉴权：`$apis.requireAuth()`，并在 handler 内用 `c.auth`
+
+### 3) 统一错误结构
+
+对外接口建议统一：
+
+```json
+{ "error": { "code": "SOME_CODE", "message": "Human readable message" } }
+```
+
+### 4) 限流要“默认开启”
+
+本项目使用 DB-backed 的 `rate_limits` 集合实现限流：
+
+```js
+if (
+  !pbcn.rateLimitAllow({
+    id: "newsletter_subscribe",
+    windowSec: 60,
+    max: 10,
+    key: ip,
+  })
+) {
+  return c.json(429, {
+    error: { code: "RATE_LIMITED", message: "Too many requests" },
+  });
+}
+```
+
+## 关联：你可以从哪些现成实现开始看
+
+- 健康检查：`apps/backend/pb_hooks/10_health.pb.js`
+- 搜索聚合：`apps/backend/pb_hooks/20_search.pb.js`
+- 插件市场 API：`apps/backend/pb_hooks/30_plugins.pb.js`
+- 案例展示 API：`apps/backend/pb_hooks/40_showcase.pb.js`
+- 下载镜像 API：`apps/backend/pb_hooks/50_downloads.pb.js`
+- Newsletter：`apps/backend/pb_hooks/55_newsletter.pb.js`
+- GitHub release 同步：`apps/backend/pb_hooks/56_release_sync.pb.js`

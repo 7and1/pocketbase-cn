@@ -1,0 +1,613 @@
+---
+title: 数据库迁移
+description: 使用 JS Migrations 管理数据库结构变更，实现版本控制和自动部署
+---
+
+PocketBase 的迁移系统让你可以**以代码的方式定义和管理数据库结构变更**。这类似于传统 ORM 的迁移功能，让你能够版本控制数据库结构、协作开发、以及在不同环境间同步结构。
+
+## 迁移系统概述
+
+### 为什么使用迁移
+
+- **版本控制**：数据库结构变更随代码一起版本化
+- **团队协作**：所有开发者使用相同的数据库结构
+- **自动化部署**：部署时自动应用新的结构变更
+- **回滚支持**：出现问题时可以快速回滚
+- **环境一致性**：开发、测试、生产环境结构一致
+
+### 迁移文件位置
+
+迁移文件存储在 `pb_migrations` 目录：
+
+```
+your-project/
+├── pb_migrations/
+│   ├── 1703143200_create_posts_collection.js
+│   ├── 1703143300_add_users_role_field.js
+│   └── 1703143400_create_indexes.js
+├── pb_data/
+├── pb_hooks/
+└── pocketbase
+```
+
+## 创建迁移
+
+### 使用 CLI 创建
+
+```bash
+# 创建新的迁移文件
+./pocketbase migrate create migration_name
+```
+
+这将创建一个以时间戳命名的 JS 文件。
+
+### 手动创建迁移
+
+手动在 `pb_migrations` 目录创建 JS 文件：
+
+```javascript
+// pb_migrations/1703143200_create_posts_collection.js
+
+/// <reference path="../pb_data/types.d.ts" />
+
+module.exports = (app) => {
+  const dao = new app.Dao();
+
+  // 检查迁移是否已执行
+  if (dao.findCollectionByNameOrId("posts")) {
+    return; // 已存在，跳过
+  }
+
+  const collection = new app.Collection({
+    id: "posts_collection_id",
+    name: "posts",
+    type: "base",
+    schema: [
+      {
+        name: "title",
+        type: "text",
+        required: true,
+        options: {
+          min: 1,
+          max: 200,
+        },
+      },
+      {
+        name: "content",
+        type: "editor",
+        required: true,
+      },
+      {
+        name: "slug",
+        type: "text",
+        required: true,
+        options: {
+          pattern: "^[a-z0-9-]+$",
+        },
+      },
+      {
+        name: "status",
+        type: "select",
+        required: true,
+        options: {
+          values: ["draft", "published", "archived"],
+          default: "draft",
+        },
+      },
+      {
+        name: "author",
+        type: "relation",
+        required: true,
+        options: {
+          collectionId: "_pb_users_auth_",
+          maxSelect: 1,
+        },
+      },
+      {
+        name: "tags",
+        type: "relation",
+        options: {
+          collectionId: "tags_id",
+          maxSelect: null,
+        },
+      },
+      {
+        name: "publishedAt",
+        type: "date",
+      },
+      {
+        name: "views",
+        type: "number",
+        options: {
+          default: 0,
+        },
+      },
+    ],
+    indexes: [
+      {
+        name: "slug_idx",
+        type: "index",
+        options: {
+          fields: ["slug"],
+          unique: true,
+        },
+      },
+      {
+        name: "status_published_idx",
+        type: "index",
+        options: {
+          fields: ["status", "publishedAt"],
+        },
+      },
+    ],
+    listRule: 'status = "published"',
+    viewRule: 'status = "published" || @request.auth.id = author',
+    createRule: '@request.auth.id != ""',
+    updateRule: '@request.auth.id = author || @request.auth.role = "admin"',
+    deleteRule: '@request.auth.id = author || @request.auth.role = "admin"',
+  });
+
+  dao.saveCollection(collection);
+};
+```
+
+## 迁移操作
+
+### 应用所有迁移
+
+```bash
+# 应用所有未执行的迁移
+./pocketbase migrate up
+```
+
+### 回滚迁移
+
+```bash
+# 回滚最后一次迁移
+./pocketbase migrate down
+
+# 回滚指定数量的迁移
+./pocketbase migrate down 3
+```
+
+### 查看迁移状态
+
+```bash
+# 列出所有迁移及其状态
+./pocketbase migrate list
+```
+
+## 常见迁移场景
+
+### 创建 Auth Collection
+
+```javascript
+// pb_migrations/1703143200_create_users_collection.js
+
+module.exports = (app) => {
+  const dao = new app.Dao();
+
+  if (dao.findCollectionByNameOrId("users")) {
+    return;
+  }
+
+  const collection = new app.Collection({
+    id: "_pb_users_auth_",
+    name: "users",
+    type: "auth",
+    schema: [
+      {
+        name: "name",
+        type: "text",
+        required: false,
+      },
+      {
+        name: "role",
+        type: "select",
+        required: true,
+        options: {
+          values: ["user", "author", "admin"],
+          default: "user",
+        },
+      },
+      {
+        name: "avatar",
+        type: "file",
+        required: false,
+        options: {
+          maxSelect: 1,
+          maxSize: 5242880,
+          mimeTypes: ["image/jpeg", "image/png", "image/webp"],
+        },
+      },
+      {
+        name: "bio",
+        type: "text",
+      },
+      {
+        name: "settings",
+        type: "json",
+      },
+    ],
+    // Auth 特定配置
+    authRule: "id = @request.auth.id",
+    authToken: {
+      duration: 604800, // 7 天
+    },
+    passwordAuth: {
+      enabled: true,
+      identityFields: ["email"],
+    },
+    emailAuth: {
+      enabled: true,
+    },
+    otpAuth: {
+      enabled: false,
+    },
+  });
+
+  dao.saveCollection(collection);
+};
+```
+
+### 添加字段
+
+```javascript
+// pb_migrations/1703143300_add_verified_field.js
+
+module.exports = (app) => {
+  const dao = new app.Dao();
+
+  const collection = dao.findCollectionByNameOrId("users");
+  if (!collection) return;
+
+  // 检查字段是否已存在
+  if (collection.schema.find((f) => f.name === "phone")) {
+    return;
+  }
+
+  collection.schema.push({
+    name: "phone",
+    type: "text",
+    required: false,
+    options: {
+      pattern: "^[0-9+]+$",
+    },
+  });
+
+  dao.saveCollection(collection);
+};
+```
+
+### 修改字段
+
+```javascript
+// pb_migrations/1703143400_update_title_max_length.js
+
+module.exports = (app) => {
+  const dao = new app.Dao();
+
+  const collection = dao.findCollectionByNameOrId("posts");
+  if (!collection) return;
+
+  const titleField = collection.schema.find((f) => f.name === "title");
+  if (titleField) {
+    titleField.options.max = 300; // 从 200 改为 300
+  }
+
+  dao.saveCollection(collection);
+};
+```
+
+### 删除字段
+
+```javascript
+// pb_migrations/1703143500_remove_old_field.js
+
+module.exports = (app) => {
+  const dao = new app.Dao();
+
+  const collection = dao.findCollectionByNameOrId("posts");
+  if (!collection) return;
+
+  collection.schema = collection.schema.filter((f) => f.name !== "oldField");
+
+  dao.saveCollection(collection);
+};
+```
+
+### 创建索引
+
+```javascript
+// pb_migrations/1703143600_create_performance_indexes.js
+
+module.exports = (app) => {
+  const dao = new app.Dao();
+
+  const collection = dao.findCollectionByNameOrId("posts");
+  if (!collection) return;
+
+  // 检查索引是否已存在
+  if (collection.indexes.find((i) => i.name === "author_status_idx")) {
+    return;
+  }
+
+  collection.indexes.push({
+    name: "author_status_idx",
+    type: "index",
+    options: {
+      fields: ["author", "status"],
+    },
+  });
+
+  collection.indexes.push({
+    name: "published_at_idx",
+    type: "index",
+    options: {
+      fields: ["publishedAt"],
+    },
+  });
+
+  dao.saveCollection(collection);
+};
+```
+
+### 数据迁移
+
+```javascript
+// pb_migrations/1703143700_migrate_data.js
+
+module.exports = async (app) => {
+  const dao = new app.Dao();
+
+  // 迁移用户数据
+  const users = dao.findCollectionByNameOrId("users");
+  if (!users) return;
+
+  const records = await dao.findRecordsByExpr(users.id);
+
+  for (const record of records) {
+    // 修改数据
+    if (!record.get("role")) {
+      record.set("role", "user");
+      await dao.saveRecord(record);
+    }
+  }
+};
+```
+
+### 批量操作
+
+```javascript
+// pb_migrations/1703143800_batch_create_categories.js
+
+module.exports = async (app) => {
+  const dao = new app.Dao();
+
+  const categories = [
+    { name: "技术", slug: "tech" },
+    { name: "生活", slug: "life" },
+    { name: "随笔", slug: "essay" },
+  ];
+
+  const collection = dao.findCollectionByNameOrId("categories");
+  if (!collection) return;
+
+  for (const cat of categories) {
+    const record = new app.Record(collection);
+    record.set(cat);
+
+    try {
+      await dao.saveRecord(record);
+    } catch (err) {
+      // 记录已存在，忽略
+      console.log("Category already exists:", cat.name);
+    }
+  }
+};
+```
+
+## 高级用法
+
+### 条件迁移
+
+```javascript
+module.exports = (app) => {
+  const dao = new app.Dao();
+
+  // 只在特定环境执行
+  if (process.env.NODE_ENV === "production") {
+    // 生产环境特定的迁移
+  }
+
+  // 基于现有数据判断
+  const posts = dao.findCollectionByNameOrId("posts");
+  if (posts && posts.schema.find((f) => f.name === "newField")) {
+    return; // 字段已存在，跳过
+  }
+
+  // 执行迁移...
+};
+```
+
+### 迁移依赖
+
+```javascript
+// 确保依赖的集合先创建
+module.exports = (app) => {
+  const dao = new app.Dao();
+
+  // 检查依赖的 tags 集合是否存在
+  const tags = dao.findCollectionByNameOrId("tags");
+  if (!tags) {
+    throw new Error("tags collection must exist first");
+  }
+
+  // 继续迁移...
+};
+```
+
+### 使用配置文件
+
+```javascript
+// pb_migrations/config.js
+module.exports = {
+  initialCollections: ["users", "posts", "comments", "tags"],
+  defaultRoles: ["user", "author", "admin"],
+};
+```
+
+```javascript
+// pb_migrations/1703143900_setup_initial_data.js
+const config = require("./config");
+
+module.exports = async (app) => {
+  const dao = new app.Dao();
+
+  const users = dao.findCollectionByNameOrId("users");
+  if (!users) return;
+
+  // 创建管理员用户
+  const admin = new app.Record(users);
+  admin.set({
+    email: "admin@example.com",
+    password: "admin123456",
+    passwordConfirm: "admin123456",
+    role: "admin",
+    verified: true,
+  });
+
+  try {
+    await dao.saveRecord(admin);
+    console.log("Admin user created");
+  } catch (err) {
+    console.log("Admin already exists");
+  }
+};
+```
+
+## 部署集成
+
+### CI/CD 集成
+
+```bash
+#!/bin/bash
+# deploy.sh
+
+echo "Running migrations..."
+
+# 备份数据
+cp -r pb_data pb_data.backup
+
+# 应用迁移
+./pocketbase migrate up
+
+# 启动服务
+./pocketbase serve
+```
+
+### Docker 部署
+
+```dockerfile
+FROM golang:1.21-alpine AS builder
+WORKDIR /app
+COPY . .
+RUN go build
+RUN ./pocketbase migrate up
+
+FROM alpine:latest
+COPY --from=builder /app/pocketbase /pocketbase
+COPY --from=builder /app/pb_data /pb_data
+COPY --from=builder /app/pb_migrations /pb_migrations
+COPY --from=builder /app/pb_hooks /pb_hooks
+
+CMD ["/pocketbase", "serve"]
+```
+
+### Docker Compose
+
+```yaml
+version: "3.8"
+services:
+  pocketbase:
+    image: ghcr.io/muchenski/pocketbase:latest
+    volumes:
+      - ./pb_data:/pb_data
+      - ./pb_migrations:/pb_migrations
+      - ./pb_hooks:/pb_hooks
+    ports:
+      - "8090:8090"
+    command: sh -c "./pocketbase migrate up && ./pocketbase serve"
+```
+
+## 最佳实践
+
+1. **命名规范**：使用描述性的迁移名称，如 `add_users_role_field`
+2. **幂等性**：迁移应该可以重复执行而不会出错
+3. **小步提交**：每个迁移只做一件事，便于回滚
+4. **先测试**：在开发环境充分测试后再应用到生产
+5. **备份数据**：执行迁移前总是先备份 `pb_data`
+6. **版本控制**：将迁移文件纳入 Git 版本控制
+7. **顺序执行**：按照时间戳顺序执行迁移
+
+## 故障排查
+
+### 迁移失败
+
+```bash
+# 查看迁移状态
+./pocketbase migrate list
+
+# 手动标记迁移为已完成
+# 编辑 pb_data/database.db 中的 _migrations 表
+```
+
+### 恢复备份
+
+```bash
+# 停止服务
+pkill pocketbase
+
+# 恢复备份
+rm -rf pb_data
+cp -r pb_data.backup pb_data
+
+# 重启服务
+./pocketbase serve
+```
+
+## 常见问题
+
+### Q: 如何在迁移中执行 SQL？
+
+使用 `db` 对象直接执行：
+
+```javascript
+module.exports = (app) => {
+  const db = app.DB();
+
+  db.NewQuery(
+    `
+    CREATE INDEX IF NOT EXISTS custom_idx
+    ON posts (status, created DESC)
+ `,
+  ).Execute();
+};
+```
+
+### Q: 如何重置所有迁移？
+
+```bash
+# 停止服务
+pkill pocketbase
+
+# 删除数据库
+rm pb_data/database.db
+
+# 重新执行所有迁移
+./pocketbase migrate up
+```
+
+### Q: 迁移会影响生产数据吗？
+
+迁移只修改结构，不会删除数据。但修改字段类型或删除字段时要注意数据兼容性。

@@ -1,0 +1,26 @@
+[Unit]
+Description=PocketBase.cn (PocketBase)
+After=network.target
+
+[Service]
+Type=simple
+User=pocketbase
+Group=pocketbase
+WorkingDirectory=/opt/pocketbase
+EnvironmentFile=/opt/pocketbase/.env
+
+# Listen on loopback and put behind a reverse proxy (Caddy/Nginx).
+ExecStart=/opt/pocketbase/pocketbase serve \
+  --http=127.0.0.1:8090 \
+  --dir /opt/pocketbase/pb_data \
+  --hooksDir /opt/pocketbase/pb_hooks \
+  --migrationsDir /opt/pocketbase/pb_migrations \
+  --publicDir /opt/pocketbase/pb_public
+
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+

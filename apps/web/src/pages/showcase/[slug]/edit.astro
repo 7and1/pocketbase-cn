@@ -1,0 +1,80 @@
+---
+export const prerender = false;
+
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import ShowcaseSubmitForm from "@/components/showcase/ShowcaseSubmitForm";
+import type { ShowcaseEditData } from "@/components/showcase/ShowcaseSubmitForm";
+import { POCKETBASE_URL } from "@/lib/constants/config";
+
+const { slug } = Astro.params;
+if (!slug) return Astro.redirect("/showcase");
+
+// Try to get the auth token from cookies
+const authCookie = Astro.cookies.get("pb_auth");
+let authToken = "";
+let userId = "";
+
+if (authCookie?.value) {
+  try {
+    const parsed = JSON.parse(authCookie.value);
+    authToken = parsed?.token || "";
+    userId = parsed?.model?.id || "";
+  } catch {
+    // Invalid cookie format
+  }
+}
+
+// If not authenticated, redirect to login
+if (!authToken || !userId) {
+  return Astro.redirect(`/auth/login?redirect=/showcase/${encodeURIComponent(slug)}/edit`);
+}
+
+// Fetch showcase data
+const res = await fetch(`${POCKETBASE_URL}/api/showcase/${encodeURIComponent(slug)}`, {
+  headers: {
+    Accept: "application/json",
+    Authorization: authToken,
+  },
+});
+
+if (!res.ok) {
+  return Astro.redirect("/showcase");
+}
+
+const json = await res.json();
+const item = json?.data;
+
+if (!item) {
+  return Astro.redirect("/showcase");
+}
+
+// Check if current user is the author
+const itemAuthor = item?.author || item?.expand?.author?.id;
+if (itemAuthor !== userId) {
+  // Not authorized to edit
+  return Astro.redirect(`/showcase/${slug}`);
+}
+
+// Prepare edit data
+const editData: ShowcaseEditData = {
+  id: item.id,
+  slug: item.slug,
+  title: item.title,
+  description: item.description,
+  url: item.url || "",
+  repository: item.repository || "",
+  category: item.category || "saas",
+  tags: Array.isArray(item.tags) ? item.tags : [],
+  content: item.content || "",
+};
+---
+
+<BaseLayout title={`Edit ${item?.title || slug} - PocketBase.cn`} description="Edit your showcase details.">
+  <h1 class="text-2xl font-semibold tracking-tight">Edit Showcase</h1>
+  <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+    Update your showcase information. Changes may need re-approval.
+  </p>
+  <div class="mt-6 max-w-3xl">
+    <ShowcaseSubmitForm client:load mode="edit" initialData={editData} />
+  </div>
+</BaseLayout>

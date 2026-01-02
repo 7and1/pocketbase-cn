@@ -1,0 +1,404 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { SITE_URL } from "@/lib/constants/config";
+
+const siteName = "PocketBase 中文网";
+const siteDescription = "PocketBase 中文网提供完整的官方文档翻译、入门教程、API 参考与进阶指南，同时汇集社区插件、实战案例与国内高速下载镜像，助力中文开发者快速掌握 PocketBase。";
+
+const organizationSchema = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: "PocketBase.cn",
+  url: SITE_URL,
+  logo: new URL("/og-image.png", SITE_URL).toString(),
+  sameAs: [
+    "https://github.com/pocketbase/pocketbase"
+  ],
+  description: siteDescription
+};
+
+const webSiteSchema = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: siteName,
+  url: SITE_URL,
+  description: siteDescription,
+  inLanguage: "zh-CN",
+  potentialAction: {
+    "@type": "SearchAction",
+    target: {
+      "@type": "EntryPoint",
+      urlTemplate: `${SITE_URL}/search?q={search_term_string}`
+    },
+    "query-input": {
+      "@type": "PropertyValueSpecification",
+      valueRequired: true,
+      valueName: "search_term_string"
+    }
+  }
+};
+
+const faqSchema = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: [
+    {
+      "@type": "Question",
+      name: "PocketBase 是免费的吗？",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "是的，PocketBase 采用 MIT 开源许可证，完全免费使用，无任何限制。您可以将其用于个人项目、商业项目，也可以进行二次开发和分发。"
+      }
+    },
+    {
+      "@type": "Question",
+      name: "PocketBase 适合什么规模的项目？",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "PocketBase 非常适合中小型项目，包括 MVP 产品、初创应用、内部工具等。基于 SQLite，单机可支持日活 1-5 万用户。对于更大规模的应用，可以通过主从架构、读写分离等方式扩展。"
+      }
+    },
+    {
+      "@type": "Question",
+      name: "如何将 PocketBase 部署到生产环境？",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "PocketBase 可以部署到任何支持 Go 运行的服务器。推荐使用 Nginx 或 Caddy 作为反向代理，配置 SSL 证书。国内可以部署到阿里云 ECS、腾讯云 CVM 等。"
+      }
+    },
+    {
+      "@type": "Question",
+      name: "PocketBase 支持哪些前端框架？",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "PocketBase 提供官方 JavaScript SDK，支持所有主流前端框架，包括 Vue、React、Angular、Svelte、Solid 等。也支持原生 JavaScript、TypeScript。移动端可以使用 React Native、Flutter 等通过 HTTP API 集成。"
+      }
+    },
+    {
+      "@type": "Question",
+      name: "如何参与 PocketBase 中文社区？",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "您可以：1) 在插件市场提交您开发的插件；2) 在案例展示中分享您的项目；3) 贡献文档翻译和改进；4) 在 GitHub 上提交 Issue 和 PR。欢迎加入我们的社区建设！"
+      }
+    }
+  ]
+};
+
+const howToSchema = {
+  "@context": "https://schema.org",
+  "@type": "HowTo",
+  name: "如何快速开始使用 PocketBase",
+  description: "4 个简单步骤快速启动 PocketBase 开发环境",
+  totalTime: "PT5M",
+  step: [
+    {
+      "@type": "HowToStep",
+      position: 1,
+      name: "下载 PocketBase",
+      text: "访问下载页面，选择适合您操作系统的版本。支持 Windows、macOS、Linux 以及 ARM 架构。",
+      url: `${SITE_URL}/downloads`
+    },
+    {
+      "@type": "HowToStep",
+      position: 2,
+      name: "启动服务",
+      text: "解压后，在终端运行：./pocketbase serve"
+    },
+    {
+      "@type": "HowToStep",
+      position: 3,
+      name: "访问管理界面",
+      text: "打开浏览器访问 http://localhost:8090/_/，设置管理员账号即可开始使用。"
+    },
+    {
+      "@type": "HowToStep",
+      position: 4,
+      name: "集成到项目",
+      text: "安装 JavaScript SDK：npm install pocketbase"
+    }
+  ]
+};
+---
+
+<BaseLayout
+  title={siteName + " - 官方文档翻译、教程与社区"}
+  description={siteDescription}
+>
+  <script type="application/ld+json" is:inline set:html={JSON.stringify(organizationSchema)} />
+  <script type="application/ld+json" is:inline set:html={JSON.stringify(webSiteSchema)} />
+  <script type="application/ld+json" is:inline set:html={JSON.stringify(faqSchema)} />
+  <script type="application/ld+json" is:inline set:html={JSON.stringify(howToSchema)} />
+
+  <!-- Hero Section -->
+  <section class="py-6">
+    <div class="rounded-2xl border border-neutral-200 bg-gradient-to-br from-white to-brand-50 p-8 dark:border-neutral-800 dark:from-neutral-950 dark:to-neutral-900">
+      <h1 class="text-3xl font-semibold tracking-tight md:text-4xl">
+        PocketBase.cn
+      </h1>
+      <p class="mt-3 max-w-2xl text-neutral-700 dark:text-neutral-300">
+        面向中文用户的 PocketBase 生态站点：高质量中文文档、插件市场、案例展示与下载镜像。
+      </p>
+      <div class="mt-6 flex flex-wrap gap-3">
+        <a
+          class="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+          href="/docs"
+        >
+          开始阅读文档
+        </a>
+        <a
+          class="rounded-md border border-neutral-200 bg-white px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-100 dark:hover:bg-neutral-900"
+          href="/plugins"
+        >
+          浏览插件
+        </a>
+        <a
+          class="rounded-md border border-neutral-200 bg-white px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-100 dark:hover:bg-neutral-900"
+          href="/showcase"
+        >
+          查看案例
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- What is PocketBase -->
+  <section class="py-8">
+    <h2 class="text-2xl font-semibold tracking-tight">什么是 PocketBase？</h2>
+    <div class="mt-4 prose dark:prose-invert max-w-none">
+      <p>
+        PocketBase 是一个开源的后端即服务（BaaS）解决方案，专为现代移动应用、Web 应用和浏览器扩展设计。它将数据库、认证系统、文件存储和实时订阅等功能打包到一个可执行文件中，大小仅约 15MB。
+      </p>
+      <p>
+        与 Firebase 等托管服务不同，PocketBase 采用自托管模式，这意味着您拥有对数据的完全控制权，可以将其部署在任何服务器上，包括国内云服务商。对于中国开发者而言，这解决了 Firebase 在国内访问不稳定、数据合规性等问题。
+      </p>
+      <h3 class="text-xl font-semibold mt-6">核心特性</h3>
+      <ul class="list-disc pl-6 mt-3 space-y-2">
+        <li><strong>内置 SQLite 数据库</strong>：单文件存储，易于备份和迁移，支持完整的 SQL 查询</li>
+        <li><strong>完整的认证系统</strong>：支持邮箱密码、OAuth2、匿名登录等多种认证方式</li>
+        <li><strong>实时订阅</strong>：基于 WebSocket 的实时数据同步，适合聊天、协作等场景</li>
+        <li><strong>文件存储</strong>：本地文件系统存储，支持缩略图生成，可扩展到云存储</li>
+        <li><strong>Admin UI</strong>：内置管理界面，可视化管理数据、用户和权限</li>
+        <li><strong>扩展能力</strong>：支持 JavaScript Hooks 和 Go 插件扩展功能</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- Why PocketBase for Chinese Developers -->
+  <section class="py-8">
+    <h2 class="text-2xl font-semibold tracking-tight">为什么选择 PocketBase？</h2>
+    <div class="mt-6 grid gap-4 md:grid-cols-2">
+      <div class="rounded-xl border border-neutral-200 p-6 dark:border-neutral-800">
+        <h3 class="text-lg font-semibold text-brand-700 dark:text-brand-300">国内访问稳定</h3>
+        <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+          无需代理，部署在国内服务器上即可获得稳定的访问速度。API 响应时间通常在 20-80ms，远优于 Firebase 的 500ms+。
+        </p>
+      </div>
+      <div class="rounded-xl border border-neutral-200 p-6 dark:border-neutral-800">
+        <h3 class="text-lg font-semibold text-brand-700 dark:text-brand-300">数据合规无忧</h3>
+        <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+          数据存储在您自己的服务器上，符合《网络安全法》数据本地化要求，满足等保 2.0/3.0 认证标准。
+        </p>
+      </div>
+      <div class="rounded-xl border border-neutral-200 p-6 dark:border-neutral-800">
+        <h3 class="text-lg font-semibold text-brand-700 dark:text-brand-300">成本可控</h3>
+        <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+          无 API 请求费用，无存储费用，无用户数量限制。仅需支付服务器成本，小型项目月费可低至 60 元。
+        </p>
+      </div>
+      <div class="rounded-xl border border-neutral-200 p-6 dark:border-neutral-800">
+        <h3 class="text-lg font-semibold text-brand-700 dark:text-brand-300">完全自主可控</h3>
+        <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+          开源 MIT 许可证，无供应商锁定。可以根据业务需求定制功能，通过 Go 插件或 JS Hooks 扩展能力。
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Quick Start Guide -->
+  <section class="py-8">
+    <h2 class="text-2xl font-semibold tracking-tight">快速开始</h2>
+    <div class="mt-4 prose dark:prose-invert max-w-none">
+      <h3 class="text-xl font-semibold mt-6">1. 下载 PocketBase</h3>
+      <p>访问<a href="/downloads">下载页面</a>，选择适合您操作系统的版本。支持 Windows、macOS、Linux 以及 ARM 架构。</p>
+
+      <h3 class="text-xl font-semibold mt-6">2. 启动服务</h3>
+      <p>解压后，在终端运行：</p>
+      <pre class="bg-neutral-100 dark:bg-neutral-900 p-4 rounded-lg overflow-x-auto text-sm"><code>./pocketbase serve</code></pre>
+
+      <h3 class="text-xl font-semibold mt-6">3. 访问管理界面</h3>
+      <p>打开浏览器访问 <code>http://localhost:8090/_/</code>，设置管理员账号即可开始使用。</p>
+
+      <h3 class="text-xl font-semibold mt-6">4. 集成到项目</h3>
+      <p>安装 JavaScript SDK：</p>
+      <pre class="bg-neutral-100 dark:bg-neutral-900 p-4 rounded-lg overflow-x-auto text-sm"><code>npm install pocketbase</code></pre>
+    </div>
+  </section>
+
+  <!-- Feature Cards -->
+  <section class="grid gap-4 py-8 md:grid-cols-4">
+    <div class="rounded-xl border border-neutral-200 p-6 dark:border-neutral-800">
+      <h2 class="text-lg font-semibold">中文文档</h2>
+      <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+        以「可操作」为导向，覆盖入门、API、SDK 与高级扩展（P2）。
+      </p>
+      <a class="mt-4 inline-block text-sm font-medium text-brand-700 hover:underline dark:text-brand-300" href="/docs">
+        打开文档 ->
+      </a>
+    </div>
+    <div class="rounded-xl border border-neutral-200 p-6 dark:border-neutral-800">
+      <h2 class="text-lg font-semibold">技术博客</h2>
+      <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+        教程、对比分析、最佳实践与生产部署指南。
+      </p>
+      <a class="mt-4 inline-block text-sm font-medium text-brand-700 hover:underline dark:text-brand-300" href="/blog">
+        阅读文章 ->
+      </a>
+    </div>
+    <div class="rounded-xl border border-neutral-200 p-6 dark:border-neutral-800">
+      <h2 class="text-lg font-semibold">插件市场</h2>
+      <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+        发现社区插件与扩展，查看 README、版本与下载统计。
+      </p>
+      <a class="mt-4 inline-block text-sm font-medium text-brand-700 hover:underline dark:text-brand-300" href="/plugins">
+        浏览插件 ->
+      </a>
+    </div>
+    <div class="rounded-xl border border-neutral-200 p-6 dark:border-neutral-800">
+      <h2 class="text-lg font-semibold">下载镜像</h2>
+      <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+        自动同步 PocketBase 官方 Releases，展示校验信息与统计。
+      </p>
+      <a class="mt-4 inline-block text-sm font-medium text-brand-700 hover:underline dark:text-brand-300" href="/downloads">
+        前往下载 ->
+      </a>
+    </div>
+  </section>
+
+  <!-- Comparison Section -->
+  <section class="py-8">
+    <h2 class="text-2xl font-semibold tracking-tight">PocketBase vs Firebase</h2>
+    <div class="mt-4 overflow-x-auto">
+      <table class="min-w-full border border-neutral-200 dark:border-neutral-800">
+        <thead class="bg-neutral-50 dark:bg-neutral-900">
+          <tr>
+            <th class="px-4 py-3 text-left text-sm font-semibold">特性</th>
+            <th class="px-4 py-3 text-left text-sm font-semibold">PocketBase</th>
+            <th class="px-4 py-3 text-left text-sm font-semibold">Firebase</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-neutral-200 dark:divide-neutral-800">
+          <tr>
+            <td class="px-4 py-3 text-sm">部署方式</td>
+            <td class="px-4 py-3 text-sm">自托管（任意服务器）</td>
+            <td class="px-4 py-3 text-sm">Google 托管</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 text-sm">国内访问</td>
+            <td class="px-4 py-3 text-sm text-green-600 dark:text-green-400">完全可用</td>
+            <td class="px-4 py-3 text-sm text-red-600 dark:text-red-400">需要代理</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 text-sm">数据所有权</td>
+            <td class="px-4 py-3 text-sm text-green-600 dark:text-green-400">完全自主</td>
+            <td class="px-4 py-3 text-sm">Google 管理</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 text-sm">月成本（小型项目）</td>
+            <td class="px-4 py-3 text-sm text-green-600 dark:text-green-400">~60 元</td>
+            <td class="px-4 py-3 text-sm">~350-1050 元</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 text-sm">API 响应延迟</td>
+            <td class="px-4 py-3 text-sm text-green-600 dark:text-green-400">20-80ms</td>
+            <td class="px-4 py-3 text-sm text-red-600 dark:text-red-400">500ms+ 或超时</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 text-sm">数据合规</td>
+            <td class="px-4 py-3 text-sm text-green-600 dark:text-green-400">符合国内法规</td>
+            <td class="px-4 py-3 text-sm text-red-600 dark:text-red-400">数据存储海外</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-4 text-sm text-neutral-600 dark:text-neutral-400">
+      详细对比请阅读<a href="/blog/pocketbase-vs-firebase" class="text-brand-700 dark:text-brand-300 hover:underline">PocketBase vs Firebase 深度对比</a>。
+    </p>
+  </section>
+
+  <!-- FAQ Section -->
+  <section class="py-8">
+    <h2 class="text-2xl font-semibold tracking-tight">常见问题</h2>
+    <div class="mt-4 space-y-4">
+      <details class="group rounded-xl border border-neutral-200 dark:border-neutral-800">
+        <summary class="flex cursor-pointer items-center justify-between p-4 font-medium">
+          PocketBase 是免费的吗？
+          <span class="ml-4 transition group-open:rotate-180">v</span>
+        </summary>
+        <div class="px-4 pb-4 text-sm text-neutral-600 dark:text-neutral-400">
+          是的，PocketBase 采用 MIT 开源许可证，完全免费使用，无任何限制。您可以将其用于个人项目、商业项目，也可以进行二次开发和分发。
+        </div>
+      </details>
+      <details class="group rounded-xl border border-neutral-200 dark:border-neutral-800">
+        <summary class="flex cursor-pointer items-center justify-between p-4 font-medium">
+          PocketBase 适合什么规模的项目？
+          <span class="ml-4 transition group-open:rotate-180">v</span>
+        </summary>
+        <div class="px-4 pb-4 text-sm text-neutral-600 dark:text-neutral-400">
+          PocketBase 非常适合中小型项目，包括 MVP 产品、初创应用、内部工具等。基于 SQLite，单机可支持日活 1-5 万用户。对于更大规模的应用，可以通过主从架构、读写分离等方式扩展。
+        </div>
+      </details>
+      <details class="group rounded-xl border border-neutral-200 dark:border-neutral-800">
+        <summary class="flex cursor-pointer items-center justify-between p-4 font-medium">
+          如何将 PocketBase 部署到生产环境？
+          <span class="ml-4 transition group-open:rotate-180">v</span>
+        </summary>
+        <div class="px-4 pb-4 text-sm text-neutral-600 dark:text-neutral-400">
+          PocketBase 可以部署到任何支持 Go 运行的服务器。推荐使用 Nginx 或 Caddy 作为反向代理，配置 SSL 证书。国内可以部署到阿里云 ECS、腾讯云 CVM 等。详细的部署指南请参考<a href="/blog/production-deployment-checklist" class="text-brand-700 dark:text-brand-300 hover:underline">生产部署清单</a>。
+        </div>
+      </details>
+      <details class="group rounded-xl border border-neutral-200 dark:border-neutral-800">
+        <summary class="flex cursor-pointer items-center justify-between p-4 font-medium">
+          PocketBase 支持哪些前端框架？
+          <span class="ml-4 transition group-open:rotate-180">v</span>
+        </summary>
+        <div class="px-4 pb-4 text-sm text-neutral-600 dark:text-neutral-400">
+          PocketBase 提供官方 JavaScript SDK，支持所有主流前端框架，包括 Vue、React、Angular、Svelte、Solid 等。也支持原生 JavaScript、TypeScript。移动端可以使用 React Native、Flutter 等通过 HTTP API 集成。
+        </div>
+      </details>
+      <details class="group rounded-xl border border-neutral-200 dark:border-neutral-800">
+        <summary class="flex cursor-pointer items-center justify-between p-4 font-medium">
+          如何参与 PocketBase 中文社区？
+          <span class="ml-4 transition group-open:rotate-180">v</span>
+        </summary>
+        <div class="px-4 pb-4 text-sm text-neutral-600 dark:text-neutral-400">
+          您可以：1) 在插件市场提交您开发的插件；2) 在案例展示中分享您的项目；3) 贡献文档翻译和改进；4) 在 GitHub 上提交 Issue 和 PR。欢迎加入我们的社区建设！
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- CTA Section -->
+  <section class="py-8">
+    <div class="rounded-2xl bg-brand-600 p-8 text-center text-white">
+      <h2 class="text-2xl font-semibold">开始构建您的应用</h2>
+      <p class="mt-3 max-w-xl mx-auto text-brand-50">
+        PocketBase 让后端开发变得简单。立即下载，30 秒即可启动开发环境。
+      </p>
+      <div class="mt-6 flex justify-center gap-3">
+        <a
+          class="rounded-md bg-white px-6 py-2.5 text-sm font-medium text-brand-700 hover:bg-brand-50"
+          href="/downloads"
+        >
+          下载 PocketBase
+        </a>
+        <a
+          class="rounded-md border border-white/30 px-6 py-2.5 text-sm font-medium text-white hover:bg-white/10"
+          href="/docs/guides/quick-start"
+        >
+          阅读快速开始
+        </a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

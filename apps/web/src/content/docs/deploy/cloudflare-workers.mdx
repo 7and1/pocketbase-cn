@@ -1,0 +1,500 @@
+---
+title: Cloudflare Workers 部署
+description: 使用 Cloudflare Workers 部署 PocketBase，实现全球加速
+---
+
+Cloudflare Workers 可以作为 PocketBase 的反向代理，提供全球 CDN 加速和 DDoS 防护。
+
+## 架构概述
+
+```
+用户 → Cloudflare CDN → Cloudflare Worker → PocketBase 服务器
+```
+
+**优势：**
+
+- 全球 CDN 加速
+- DDoS 防护
+- 免费 SSL 证书
+- 边缘缓存
+- Web Application Firewall (WAF)
+
+## 准备工作
+
+### 1. 注册 Cloudflare
+
+1. 访问 [cloudflare.com](https://cloudflare.com)
+2. 注册账号并添加你的域名
+3. 将域名 DNS 服务器指向 Cloudflare
+
+### 2. 准备 PocketBase 服务器
+
+确保 PocketBase 服务器可以正常访问：
+
+```
+http://your-server-ip:8090
+```
+
+### 3. 配置 DNS
+
+在 Cloudflare DNS 设置中添加 A 记录：
+
+| 类型 | 名称 | 内容           | 代理状态 |
+| ---- | ---- | -------------- | -------- |
+| A    | api  | your-server-ip | 已启用   |
+| A    | www  | your-server-ip | 已启用   |
+
+## 创建 Worker
+
+### Worker 代码
+
+```javascript
+// cloudflare-worker.js
+const POCKETBASE_URL = "https://your-server-ip:8090";
+
+export default {
+  async fetch(request, env, ctx) {
+    try {
+      // 处理 CORS 预检请求
+      if (request.method === "OPTIONS") {
+        return handleCORS();
+      }
+
+      // 获取请求 URL
+      const url = new URL(request.url);
+
+      // 构建目标 URL
+      const targetUrl = POCKETBASE_URL + url.pathname + url.search;
+
+      // 克隆请求
+      const modifiedRequest = new Request(targetUrl, request);
+
+      // 添加自定义头部
+      modifiedRequest.headers.set("X-Forwarded-Host", url.hostname);
+      modifiedRequest.headers.set(
+        "X-Real-IP",
+        request.headers.get("CF-Connecting-IP"),
+      );
+
+      // 发送请求
+      const response = await fetch(modifiedRequest);
+
+      // 克隆响应
+      const modifiedResponse = new Response(response.body, response);
+
+      // 添加 CORS 头部
+      addCORSHeaders(modifiedResponse);
+
+      // 缓存控制
+      if (url.pathname.startsWith("/api/files/")) {
+        // 缓存公开文件 1 天
+        modifiedResponse.headers.set("Cache-Control", "public, max-age=86400");
+      }
+
+      return modifiedResponse;
+    } catch (error) {
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  },
+};
+
+function handleCORS() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Max-Age": "86400",
+    },
+  });
+}
+
+function addCORSHeaders(response) {
+  response.headers.set("Access-Control-Allow-Origin", "*");
+  response.headers.set(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, DELETE, OPTIONS",
+  );
+  response.headers.set(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization",
+  );
+}
+```
+
+### 部署 Worker
+
+1. 登录 Cloudflare 控制台
+2. 进入「Workers & Pages」
+3. 创建新的 Worker
+4. 粘贴上面的代码
+5. 部署 Worker
+
+### 绑定自定义域名
+
+1. 在 Worker 设置中，点击「Triggers」
+2. 添加自定义域名：`api.your-domain.com`
+3. 保存设置
+
+## 高级配置
+
+### 缓存策略
+
+```javascript
+// 缓存配置
+const CACHE_RULES = {
+  "/api/files/": {
+    cacheTtl: 86400, // 1 天
+    cacheable: true,
+  },
+  "/api/collections/_pb_users_auth_/records": {
+    cacheTtl: 0, // 不缓存
+    cacheable: false,
+  },
+};
+
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+
+    // 检查缓存规则
+    const cacheRule = getCacheRule(url.pathname);
+
+    if (cacheRule.cacheable && request.method === "GET") {
+      const cache = caches.default;
+      const cacheKey = new Request(targetUrl, request);
+
+      let response = await cache.match(cacheKey);
+
+      if (!response) {
+        response = await fetch(targetUrl);
+
+        if (response.ok) {
+          response = new Response(response.body, response);
+          response.headers.set(
+            "Cache-Control",
+            `public, max-age=${cacheRule.cacheTtl}`,
+          );
+          ctx.waitUntil(cache.put(cacheKey, response.clone()));
+        }
+      }
+
+      return response;
+    }
+
+    return await fetch(targetUrl);
+  },
+};
+
+function getCacheRule(pathname) {
+  for (const [pattern, rule] of Object.entries(CACHE_RULES)) {
+    if (pathname.startsWith(pattern)) {
+      return rule;
+    }
+  }
+  return { cacheTtl: 0, cacheable: false };
+}
+```
+
+### 速率限制
+
+```javascript
+// 使用 Cloudflare KV 存储实现速率限制
+export default {
+  async fetch(request, env, ctx) {
+    const clientIP = request.headers.get("CF-Connecting-IP");
+    const rateLimitKey = `rate_limit:${clientIP}`;
+
+    // 获取当前请求数
+    const current = (await env.RATE_LIMIT.get(rateLimitKey, {
+      type: "json",
+    })) || { count: 0 };
+
+    // 检查限制
+    if (current.count >= 100) {
+      return new Response("Too Many Requests", { status: 429 });
+    }
+
+    // 增加计数
+    await env.RATE_LIMIT.put(
+      rateLimitKey,
+      JSON.stringify({ count: current.count + 1 }),
+      {
+        expirationTtl: 60, // 1 分钟
+      },
+    );
+
+    return await fetch(request);
+  },
+};
+```
+
+### Basic Auth 保护
+
+```javascript
+const BASIC_AUTH_CREDENTIALS = "username:password"; // base64 encoded
+
+export default {
+  async fetch(request, env, ctx) {
+    // Admin UI 需要 Basic Auth
+    if (request.url.includes("/_/")) {
+      const authHeader = request.headers.get("Authorization");
+
+      if (!authHeader || !authHeader.startsWith("Basic ")) {
+        return new Response("Unauthorized", {
+          status: 401,
+          headers: {
+            "WWW-Authenticate": 'Basic realm="PocketBase Admin"',
+          },
+        });
+      }
+
+      const credentials = atob(authHeader.slice(6));
+      if (credentials !== BASIC_AUTH_CREDENTIALS) {
+        return new Response("Forbidden", { status: 403 });
+      }
+    }
+
+    return await fetch(request);
+  },
+};
+```
+
+## 环境变量
+
+### 使用 wrangler.toml
+
+```toml
+# wrangler.toml
+name = "pocketbase-proxy"
+main = "cloudflare-worker.js"
+compatibility_date = "2024-01-01"
+
+[env.production.vars]
+POCKETBASE_URL = "https://your-server-ip:8090"
+
+[env.development.vars]
+POCKETBASE_URL = "http://localhost:8090"
+```
+
+### Worker 中使用环境变量
+
+```javascript
+export default {
+  async fetch(request, env, ctx) {
+    const POCKETBASE_URL = env.POCKETBASE_URL;
+    // ...
+  },
+};
+```
+
+## KV 绑定
+
+### 创建 KV 命名空间
+
+1. 在 Cloudflare 控制台，进入「Workers & Pages」->「KV」
+2. 创建新的命名空间：`POCKETBASE_CACHE`
+
+### 绑定 KV
+
+在 Worker 设置中绑定 KV 命名空间：
+
+| 变量名 | KV 命名空间      |
+| ------ | ---------------- |
+| CACHE  | POCKETBASE_CACHE |
+
+### 使用 KV 缓存
+
+```javascript
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const cacheKey = `cache:${url.pathname}${url.search}`;
+
+    // 尝试从 KV 获取
+    const cached = await env.CACHE.get(cacheKey, "json");
+    if (cached) {
+      return new Response(JSON.stringify(cached), {
+        headers: {
+          "Content-Type": "application/json",
+          "X-Cache": "HIT",
+        },
+      });
+    }
+
+    // 请求源站
+    const response = await fetch(
+      env.POCKETBASE_URL + url.pathname + url.search,
+    );
+    const data = await response.json();
+
+    // 存入 KV（5 分钟）
+    ctx.waitUntil(
+      env.CACHE.put(cacheKey, JSON.stringify(data), { expirationTtl: 300 }),
+    );
+
+    return new Response(JSON.stringify(data), {
+      headers: {
+        "Content-Type": "application/json",
+        "X-Cache": "MISS",
+      },
+    });
+  },
+};
+```
+
+## D1 数据库（可选）
+
+Cloudflare D1 可用于缓存常用数据：
+
+### 创建 D1 数据库
+
+```bash
+# 安装 wrangler
+npm install -g wrangler
+
+# 创建 D1 数据库
+wrangler d1 create pocketbase-cache
+```
+
+### 绑定 D1
+
+在 wrangler.toml 中添加：
+
+```toml
+[[d1_databases]]
+binding = "DB"
+database_name = "pocketbase-cache"
+database_id = "your-database-id"
+```
+
+## Pages 集成
+
+### 部署前端到 Pages
+
+将前端部署到 Cloudflare Pages，Worker 处理 API 请求：
+
+```
+your-domain.com (Pages 托管前端)
+├── /api/* (Worker 转发到 PocketBase)
+```
+
+### Worker 路由配置
+
+```javascript
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+
+    // API 请求转发到 PocketBase
+    if (url.pathname.startsWith("/api/")) {
+      return await fetch(env.POCKETBASE_URL + url.pathname + url.search);
+    }
+
+    // 其他请求返回到 Pages
+    return await fetch(url);
+  },
+};
+```
+
+## 安全配置
+
+### WAF 规则
+
+在 Cloudflare WAF 中添加规则：
+
+1. 进入「Security」->「WAF」
+2. 创建自定义规则：
+
+| 规则名称      | 条件                                   | 操作 |
+| ------------- | -------------------------------------- | ---- |
+| 阻止 SQL 注入 | URI Path 包含 "union select"           | 阻止 |
+| 阻止常见攻击  | URI Path 包含 "eval(", "base64_decode" | 阻止 |
+| 速率限制      | 请求超过 100 次/分钟                   | 限制 |
+
+### Bot 保护
+
+```
+Security > Bots
+- 启用 Bot Fight Mode
+- 设置 Super Bot Fight Mode
+```
+
+## 监控与分析
+
+### Analytics
+
+Cloudflare 提供详细的分析数据：
+
+- 请求量
+- 响应时间
+- 带宽使用
+- 错误率
+- 地理分布
+
+### Logs
+
+```bash
+# 查看实时日志
+wrangler tail pocketbase-proxy
+```
+
+## 常见问题
+
+### Q: 如何实现 WebSocket 支持？
+
+Cloudflare Workers 支持 WebSocket：
+
+```javascript
+export default {
+  async fetch(request, env, ctx) {
+    const upgradeHeader = request.headers.get("Upgrade");
+    if (upgradeHeader === "websocket") {
+      return await fetch(env.POCKETBASE_URL + request.url);
+    }
+    // ...
+  },
+};
+```
+
+### Q: 如何处理文件上传？
+
+```javascript
+if (request.method === "POST") {
+  const formData = await request.formData();
+  // 直接转发 FormData
+  return await fetch(env.POCKETBASE_URL + url.pathname, {
+    method: "POST",
+    body: formData,
+  });
+}
+```
+
+### Q: 免费计划有什么限制？
+
+- 每日 100,000 个请求
+- CPU 时间限制 10ms
+- KV 读取：100,000 次/天
+- KV 写入：1,000 次/天
+
+### Q: 如何升级到付费计划？
+
+在 Workers 设置中升级到 Paid 计划：
+
+- $5/月
+- 1000 万个请求
+- 更高的 CPU 时间限制
+
+## 最佳实践
+
+1. **缓存公开文件**：设置合理的缓存时间
+2. **保护 Admin UI**：使用 IP 白名单或 Basic Auth
+3. **监控使用量**：避免超出免费配额
+4. **配置 WAF**：防止常见攻击
+5. **使用 HTTPS**：Cloudflare 自动提供免费 SSL
+6. **测试路由**：确保所有路径正确转发
+7. **设置回退源**：配置健康检查

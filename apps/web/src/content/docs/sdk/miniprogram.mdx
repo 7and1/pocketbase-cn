@@ -1,0 +1,818 @@
+---
+title: 微信小程序集成
+description: 在微信小程序中集成 PocketBase，处理登录、数据和文件上传
+---
+
+微信小程序可以通过 PocketBase JS SDK 进行交互，需要注意网络请求配置和登录流程。
+
+## 准备工作
+
+### 小程序端配置
+
+1. 登录微信公众平台
+2. 进入「开发」->「开发管理」->「开发设置」
+3. 配置服务器域名白名单
+
+在「request 合法域名」中添加：
+
+```
+https://your-domain.com
+```
+
+**注意：** 小程序要求使用 HTTPS，且域名需要备案。
+
+### 后端配置
+
+```javascript
+// pocketbase main.go
+package main
+
+import (
+    "log"
+
+    "github.com/pocketbase/pocketbase"
+    "github.com/pocketbase/pocketbase/plugins/cors"
+)
+
+func main() {
+    app := pocketbase.New()
+
+    // 配置 CORS，允许小程序域名
+    cors.Register(app, cors.Config{
+        AllowOrigins: []string{"https://servicewechat.com"},
+        AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+        AllowHeaders: []string{"Content-Type", "Authorization"},
+        AllowCredentials: true,
+    })
+
+    if err := app.Start(); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+## 项目配置
+
+### 下载 SDK
+
+```bash
+npm install pocketbase
+# 或使用小程序 npm
+npm install --production pocketbase
+```
+
+### 工具类封装
+
+```javascript
+// utils/pocketbase.js
+import PocketBase from "pocketbase";
+
+const PB_URL = "https://your-domain.com";
+
+export const pb = new PocketBase(PB_URL);
+
+// 自定义存储适配器（适配小程序）
+class WxStorage {
+  get(key) {
+    try {
+      const value = wx.getStorageSync(key);
+      return value ? JSON.parse(value) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  set(key, value) {
+    try {
+      wx.setStorageSync(key, JSON.stringify(value));
+    } catch (e) {
+      console.error("Storage set error:", e);
+    }
+  }
+
+  remove(key) {
+    wx.removeStorageSync(key);
+  }
+
+  clear() {
+    wx.clearStorageSync();
+  }
+}
+
+// 替换默认存储
+pb.authStore.storage = new WxStorage();
+
+// 恢复登录状态
+try {
+  const stored = pb.authStore.storage.get("pb_auth");
+  if (stored) {
+    pb.authStore.save(stored.token, stored.model);
+  }
+} catch (e) {
+  console.error("Auth restore error:", e);
+}
+
+// 监听登录状态变化
+pb.authStore.onChange((token, model) => {
+  pb.authStore.storage.set("pb_auth", { token, model });
+});
+
+export default pb;
+```
+
+## 用户认证
+
+### 微信登录流程
+
+小程序使用微信登录需要后端配合：
+
+1. 小程序调用 `wx.login` 获取 code
+2. 后端用 code 换取 openid 和 session_key
+3. 后端创建或返回用户信息
+
+### 小程序端登录
+
+```javascript
+// pages/login/index.js
+import { pb } from "../../utils/pocketbase";
+
+Page({
+  data: {
+    loading: false,
+  },
+
+  // 微信登录
+  async handleWechatLogin() {
+    this.setData({ loading: true });
+
+    try {
+      // 1. 获取微信 code
+      const { code } = await wx.login();
+
+      // 2. 发送到后端处理
+      const result = await pb.send("/api/wechat-login", {
+        method: "POST",
+        body: JSON.stringify({ code }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      // 3. 保存用户信息
+      pb.authStore.save(result.token, result.user);
+
+      // 4. 跳转到首页
+      wx.switchTab({
+        url: "/pages/index/index",
+      });
+
+      wx.showToast({
+        title: "登录成功",
+        icon: "success",
+      });
+    } catch (err) {
+      console.error("Login error:", err);
+      wx.showToast({
+        title: "登录失败",
+        icon: "none",
+      });
+    } finally {
+      this.setData({ loading: false });
+    }
+  },
+
+  // 获取用户信息授权（可选）
+  async getUserProfile(e) {
+    if (e.detail.userInfo) {
+      // 用户同意授权
+      const { userInfo } = e.detail;
+
+      // 更新用户信息
+      try {
+        await pb.collection("users").update(pb.authStore.model.id, {
+          name: userInfo.nickName,
+          avatar: userInfo.avatarUrl,
+        });
+
+        wx.showToast({
+          title: "更新成功",
+          icon: "success",
+        });
+      } catch (err) {
+        console.error("Update error:", err);
+      }
+    } else {
+      wx.showToast({
+        title: "需要授权",
+        icon: "none",
+      });
+    }
+  },
+});
+```
+
+### 后端微信登录处理
+
+```javascript
+// pocketbase hooks/WeChatLogin.js
+onRecordAuthRequest((e) => {
+  const collection = e.record.collection();
+
+  if (collection.name === "users" && e.http.Request().Method === "POST") {
+    const body = e.http.Request().Body;
+
+    // 检查是否是微信登录请求
+    if (body && body.code) {
+      const code = body.code;
+      const appId = "your_wechat_appid";
+      const appSecret = "your_wechat_secret";
+
+      // 调用微信接口换取 openid
+      const wxResponse = $http.send({
+        url: `https://api.weixin.qq.com/sns/jscode2session`,
+        method: "GET",
+        params: {
+          appid: appId,
+          secret: appSecret,
+          js_code: code,
+          grant_type: "authorization_code",
+        },
+      });
+
+      if (wxResponse.errcode !== 0) {
+        throw new BadRequestError("WeChat login failed");
+      }
+
+      const openid = wxResponse.openid;
+
+      // 查找或创建用户
+      let user = e.dao.findRecordsByExpr(
+        e.record.collection(),
+        `wechatOpenid = '${openid}'`,
+      )[0];
+
+      if (!user) {
+        user = new e.Record(e.record.collection());
+        user.set({
+          wechatOpenid: openid,
+          email: `${openid}@wechat.local`,
+          password: $security.randomString(32),
+          passwordConfirm: $security.randomString(32),
+          name: "微信用户",
+          verified: true,
+        });
+        e.dao.saveRecord(user);
+      }
+
+      // 生成 token
+      const token = user.NewStaticAuthToken();
+
+      e.http.Response().WriteJson({
+        token,
+        user: user.export(),
+      });
+
+      return;
+    }
+  }
+});
+```
+
+### 手机号登录（新版）
+
+```javascript
+// pages/login/index.js
+Page({
+  async handlePhoneLogin(e) {
+    const { code } = e.detail;
+
+    try {
+      // 发送 code 到后端获取手机号
+      const result = await pb.send("/api/phone-login", {
+        method: "POST",
+        body: JSON.stringify({ code }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      pb.authStore.save(result.token, result.user);
+
+      wx.switchTab({
+        url: "/pages/index/index",
+      });
+    } catch (err) {
+      wx.showToast({
+        title: "登录失败",
+        icon: "none",
+      });
+    }
+  },
+});
+```
+
+```html
+<!-- pages/login/index.wxml -->
+<button open-type="getPhoneNumber" bindgetphonenumber="handlePhoneLogin">
+  手机号登录
+</button>
+```
+
+## 数据请求
+
+### 封装请求方法
+
+```javascript
+// utils/request.js
+import { pb } from "./pocketbase";
+
+// 通用请求
+export function request(options) {
+  return new Promise((resolve, reject) => {
+    wx.request({
+      url: `${pb.baseUrl}${options.url}`,
+      method: options.method || "GET",
+      data: options.data,
+      header: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${pb.authStore.token}`,
+        ...options.header,
+      },
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(res.data);
+        } else {
+          reject({
+            statusCode: res.statusCode,
+            message: res.data?.message || "请求失败",
+          });
+        }
+      },
+      fail: (err) => {
+        reject(err);
+      },
+    });
+  });
+}
+
+// GET 请求
+export function get(url, data) {
+  return request({ url, method: "GET", data });
+}
+
+// POST 请求
+export function post(url, data) {
+  return request({ url, method: "POST", data });
+}
+
+// PUT 请求
+export function put(url, data) {
+  return request({ url, method: "PUT", data });
+}
+
+// DELETE 请求
+export function del(url) {
+  return request({ url, method: "DELETE" });
+}
+```
+
+### 获取列表数据
+
+```javascript
+// pages/posts/index.js
+import { pb } from "../../utils/pocketbase";
+
+Page({
+  data: {
+    posts: [],
+    page: 1,
+    loading: false,
+    hasMore: true,
+  },
+
+  onLoad() {
+    this.loadPosts();
+  },
+
+  async loadPosts() {
+    if (this.data.loading || !this.data.hasMore) return;
+
+    this.setData({ loading: true });
+
+    try {
+      const result = await pb.collection("posts").getList(this.data.page, 10, {
+        filter: 'status = "published"',
+        sort: "-created",
+      });
+
+      this.setData({
+        posts: [...this.data.posts, ...result.items],
+        page: this.data.page + 1,
+        hasMore: result.items.length === 10,
+      });
+    } catch (err) {
+      console.error("Load error:", err);
+      wx.showToast({
+        title: "加载失败",
+        icon: "none",
+      });
+    } finally {
+      this.setData({ loading: false });
+    }
+  },
+
+  onReachBottom() {
+    this.loadPosts();
+  },
+
+  onPullDownRefresh() {
+    this.setData({
+      posts: [],
+      page: 1,
+      hasMore: true,
+    });
+    this.loadPosts().then(() => {
+      wx.stopPullDownRefresh();
+    });
+  },
+
+  goToDetail(e) {
+    const { id } = e.currentTarget.dataset;
+    wx.navigateTo({
+      url: `/pages/post-detail/index?id=${id}`,
+    });
+  },
+});
+```
+
+```html
+<!-- pages/posts/index.wxml -->
+<view class="posts">
+  <view
+    wx:for="{{posts}}"
+    wx:key="id"
+    class="post-item"
+    bindtap="goToDetail"
+    data-id="{{item.id}}"
+  >
+    <image wx:if="{{item.cover}}" src="{{item.cover}}" mode="aspectFill" />
+    <view class="post-content">
+      <text class="post-title">{{item.title}}</text>
+      <text class="post-excerpt">{{item.excerpt}}</text>
+    </view>
+  </view>
+
+  <view wx:if="{{loading}}" class="loading">加载中...</view>
+  <view wx:if="{{!hasMore}}" class="no-more">没有更多了</view>
+</view>
+```
+
+## 文件上传
+
+### 选择和上传图片
+
+```javascript
+// pages/publish/index.js
+import { pb } from "../../utils/pocketbase";
+
+Page({
+  data: {
+    images: [],
+    uploading: false,
+  },
+
+  // 选择图片
+  chooseImage() {
+    const maxCount = 9 - this.data.images.length;
+
+    wx.chooseMedia({
+      count: maxCount,
+      mediaType: ["image"],
+      sourceType: ["album", "camera"],
+      success: (res) => {
+        const files = res.tempFiles.map((file) => ({
+          path: file.tempFilePath,
+          size: file.size,
+        }));
+
+        this.setData({
+          images: [...this.data.images, ...files],
+        });
+      },
+    });
+  },
+
+  // 删除图片
+  removeImage(e) {
+    const { index } = e.currentTarget.dataset;
+    const images = this.data.images.filter((_, i) => i !== index);
+    this.setData({ images });
+  },
+
+  // 上传图片
+  async uploadImage(tempFilePath) {
+    return new Promise((resolve, reject) => {
+      const uploadTask = wx.uploadFile({
+        url: `${pb.baseUrl}/api/collections/posts/records`,
+        filePath: tempFilePath,
+        name: "cover",
+        formData: {
+          title: "Uploaded image",
+        },
+        header: {
+          Authorization: `Bearer ${pb.authStore.token}`,
+        },
+        success: (res) => {
+          if (res.statusCode === 200) {
+            const data = JSON.parse(res.data);
+            resolve(data);
+          } else {
+            reject(new Error("Upload failed"));
+          }
+        },
+        fail: reject,
+      });
+
+      uploadTask.onProgressUpdate((res) => {
+        console.log("Upload progress:", res.progress);
+      });
+    });
+  },
+
+  // 发布内容
+  async publish() {
+    const { title, content } = this.data;
+    const { images } = this.data;
+
+    if (!title) {
+      wx.showToast({
+        title: "请输入标题",
+        icon: "none",
+      });
+      return;
+    }
+
+    this.setData({ uploading: true });
+
+    try {
+      // 先上传图片
+      const cover = images[0] ? await this.uploadImage(images[0].path) : null;
+
+      // 创建记录
+      await pb.collection("posts").create({
+        title,
+        content,
+        cover: cover?.cover,
+        status: "published",
+      });
+
+      wx.showToast({
+        title: "发布成功",
+        icon: "success",
+      });
+
+      setTimeout(() => {
+        wx.navigateBack();
+      }, 1500);
+    } catch (err) {
+      console.error("Publish error:", err);
+      wx.showToast({
+        title: "发布失败",
+        icon: "none",
+      });
+    } finally {
+      this.setData({ uploading: false });
+    }
+  },
+});
+```
+
+```html
+<!-- pages/publish/index.wxml -->
+<form bindsubmit="handleSubmit">
+  <input name="title" placeholder="标题" bindinput="onTitleInput" />
+  <textarea name="content" placeholder="内容" bindinput="onContentInput" />
+
+  <view class="images">
+    <view wx:for="{{images}}" wx:key="index" class="image-item">
+      <image src="{{item.path}}" mode="aspectFill" />
+      <view class="delete-btn" bindtap="removeImage" data-index="{{index}}">
+        ×
+      </view>
+    </view>
+
+    <view wx:if="{{images.length < 9}}" class="add-image" bindtap="chooseImage">
+      +
+    </view>
+  </view>
+
+  <button formType="submit" loading="{{uploading}}" disabled="{{uploading}}">
+    {{uploading ? '发布中...' : '发布'}}
+  </button>
+</form>
+```
+
+## 实时功能
+
+### 使用轮询实现实时更新
+
+小程序不支持 WebSocket 订阅，可以使用轮询：
+
+```javascript
+// utils/realtime.js
+import { pb } from "./pocketbase";
+
+export function usePolling(collection, filter, callback, interval = 5000) {
+  let lastId = null;
+  let timer = null;
+
+  async function poll() {
+    try {
+      const result = await pb.collection(collection).getList(1, 10, {
+        filter,
+        sort: "-created",
+      });
+
+      if (result.items.length > 0) {
+        const latestId = result.items[0].id;
+
+        if (lastId && latestId !== lastId) {
+          // 有新数据
+          const newItems = result.items.filter((item) => item.id !== lastId);
+          callback(newItems);
+        }
+
+        lastId = latestId;
+      }
+    } catch (err) {
+      console.error("Poll error:", err);
+    }
+  }
+
+  function start() {
+    if (!timer) {
+      timer = setInterval(poll, interval);
+    }
+  }
+
+  function stop() {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  }
+
+  return { start, stop };
+}
+```
+
+### 在页面中使用
+
+```javascript
+// pages/index/index.js
+import { usePolling } from "../../utils/realtime";
+
+Page({
+  data: {
+    posts: [],
+  },
+
+  onLoad() {
+    this.polling = usePolling("posts", 'status = "published"', (newItems) => {
+      this.setData({
+        posts: [...newItems, ...this.data.posts],
+      });
+    });
+
+    this.polling.start();
+  },
+
+  onUnload() {
+    this.polling?.stop();
+  },
+});
+```
+
+## 全局状态管理
+
+### 使用 getApp()
+
+```javascript
+// app.js
+import { pb } from "./utils/pocketbase";
+
+App({
+  globalData: {
+    user: null,
+    token: "",
+  },
+
+  onLaunch() {
+    // 恢复登录状态
+    if (pb.authStore.isValid) {
+      this.globalData.user = pb.authStore.model;
+      this.globalData.token = pb.authStore.token;
+    }
+
+    // 监听登录状态
+    pb.authStore.onChange((token, model) => {
+      this.globalData.user = model;
+      this.globalData.token = token;
+    });
+  },
+});
+```
+
+### 在页面中使用
+
+```javascript
+// pages/profile/index.js
+const app = getApp();
+
+Page({
+  onLoad() {
+    this.setData({
+      user: app.globalData.user,
+    });
+  },
+});
+```
+
+## 常见问题
+
+### Q: request 请求失败？
+
+检查：
+
+1. 服务器域名是否已加入白名单
+2. 是否使用 HTTPS
+3. 服务器是否正常运行
+4. 网络请求是否已在 app.json 中配置
+
+```json
+{
+  "permission": {
+    "scope.userLocation": {
+      "desc": "你的位置信息将用于小程序位置接口的效果展示"
+    }
+  }
+}
+```
+
+### Q: 如何处理 Token 过期？
+
+```javascript
+// 在请求拦截器中处理
+pb.beforeSend = function (url, options) {
+  const token = pb.authStore.token;
+
+  if (token) {
+    options.headers = options.headers || {};
+    options.headers["Authorization"] = `Bearer ${token}`;
+  }
+};
+
+// 响应拦截器
+pb.afterSend = function (response, data) {
+  if (response.status === 401) {
+    // Token 过期，清除登录状态
+    pb.authStore.clear();
+
+    wx.navigateTo({
+      url: "/pages/login/index",
+    });
+  }
+
+  return data;
+};
+```
+
+### Q: 如何调试网络请求？
+
+在微信开发者工具中：
+
+1. 开启「不校验合法域名」
+2. 查看 Network 面板
+3. 查看 Console 错误信息
+
+### Q: 文件上传大小限制？
+
+小程序上传文件最大 10MB，如需上传更大文件，需要分片上传。
+
+```javascript
+// 分片上传示例
+async function uploadChunked(file, chunkSize = 1024 * 1024) {
+  const chunks = Math.ceil(file.size / chunkSize);
+  const uploadId = generateUUID();
+
+  for (let i = 0; i < chunks; i++) {
+    const start = i * chunkSize;
+    const end = Math.min(start + chunkSize, file.size);
+    const chunk = file.slice(start, end);
+
+    await uploadChunk(uploadId, i, chunk);
+  }
+
+  return await completeUpload(uploadId);
+}
+```

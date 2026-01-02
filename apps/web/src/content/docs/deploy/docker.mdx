@@ -1,0 +1,373 @@
+---
+title: Docker 部署
+description: 使用 Docker 和 Docker Compose 部署 PocketBase 的完整指南
+---
+
+Docker 是部署 PocketBase 的推荐方式之一，可以确保环境一致性并简化部署流程。
+
+## 基础 Docker 部署
+
+### 使用官方镜像
+
+PocketBase 提供了预构建的 Docker 镜像，可以直接使用：
+
+```bash
+docker run -d \
+  --name pocketbase \
+  -p 8090:8090 \
+  -v ./pb_data:/pb/pb_data \
+  -v ./pb_public:/pb/pb_public \
+  ghcr.io/muchobien/pocketbase:latest
+```
+
+### 自定义 Dockerfile
+
+```dockerfile
+# 使用 Alpine Linux 基础镜像
+FROM alpine:latest
+
+# 安装必要工具
+RUN apk add --no-cache ca-certificates curl
+
+# 创建工作目录
+WORKDIR /pb
+
+# 下载 PocketBase
+ARG PB_VERSION=0.22.0
+RUN curl -L \
+    "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip" \
+    -o pocketbase.zip && \
+    unzip pocketbase.zip && \
+    rm pocketbase.zip
+
+# 暴露端口
+EXPOSE 8090
+
+# 挂载点
+VOLUME ["/pb/pb_data"]
+
+# 启动命令
+CMD ["./pocketbase", "serve", "--http=0.0.0.0:8090"]
+```
+
+构建和运行：
+
+```bash
+# 构建镜像
+docker build -t pocketbase-custom .
+
+# 运行容器
+docker run -d \
+  --name pocketbase \
+  -p 8090:8090 \
+  -v $(pwd)/pb_data:/pb/pb_data \
+  pocketbase-custom
+```
+
+## Docker Compose 部署
+
+### 基础配置
+
+创建 `docker-compose.yml`：
+
+```yaml
+version: "3.8"
+
+services:
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:latest
+    container_name: pocketbase
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - ./pb_data:/pb/pb_data
+      - ./pb_hooks:/pb/pb_hooks
+      - ./pb_public:/pb/pb_public
+    environment:
+      - POCKETBASE_ENCRYPTION_KEY=your-encryption-key
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+```
+
+启动服务：
+
+```bash
+docker-compose up -d
+```
+
+### 完整生产配置
+
+```yaml
+version: "3.8"
+
+services:
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:latest
+    container_name: pocketbase
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - ./pb_data:/pb/pb_data
+      - ./pb_hooks:/pb/pb_hooks
+      - ./pb_public:/pb/pb_public
+      - ./pb_migrations:/pb/pb_migrations
+    environment:
+      - POCKETBASE_ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -q -O- http://localhost:8090/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - pocketbase-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # 可选：Caddy 反向代理
+  caddy:
+    image: caddy:latest
+    container_name: pocketbase-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./caddy_data:/data
+      - ./caddy_config:/config
+    environment:
+      - ACME_AGREE=true
+    networks:
+      - pocketbase-net
+    depends_on:
+      - pocketbase
+
+  # 可选：备份服务
+  backup:
+    image: alpine:latest
+    container_name: pocketbase-backup
+    restart: unless-stopped
+    volumes:
+      - ./pb_data:/data/source:ro
+      - ./backups:/data/backup
+    command: >
+      sh -c "
+      while true; do
+        tar -czf /data/backup/pb_data_$$(date +%Y%m%d_%H%M%S).tar.gz -C /data/source .
+        find /data/backup -name 'pb_data_*.tar.gz' -mtime +7 -delete
+        sleep 86400
+      done
+      "
+    networks:
+      - pocketbase-net
+
+networks:
+  pocketbase-net:
+    driver: bridge
+```
+
+`.env` 文件：
+
+```env
+ENCRYPTION_KEY=your-32-character-encryption-key-here
+```
+
+`Caddyfile`：
+
+```caddyfile
+your-domain.com {
+    reverse_proxy pocketbase:8090
+
+    # 日志
+    log {
+        output file /var/log/caddy/pocketbase-access.log
+    }
+}
+```
+
+## 数据持久化
+
+### 卷管理
+
+```bash
+# 列出所有卷
+docker volume ls
+
+# 创建命名卷
+docker volume create pb_data
+
+# 使用命名卷运行
+docker run -d \
+  --name pocketbase \
+  -p 8090:8090 \
+  -v pb_data:/pb/pb_data \
+  ghcr.io/muchobien/pocketbase:latest
+
+# 备份卷
+docker run --rm \
+  -v pb_data:/data \
+  -v $(pwd):/backup \
+  alpine tar -czf /backup/pb_data_backup.tar.gz /data
+
+# 恢复卷
+docker run --rm \
+  -v pb_data:/data \
+  -v $(pwd):/backup \
+  alpine tar -xzf /backup/pb_data_backup.tar.gz -C /
+```
+
+### 备份脚本
+
+```bash
+#!/bin/bash
+# backup.sh
+
+BACKUP_DIR="./backups"
+DATE=$(date +%Y%m%d_%H%M%S)
+mkdir -p "$BACKUP_DIR"
+
+# 备份 pb_data
+docker run --rm \
+  -v $(pwd)/pb_data:/data:ro \
+  -v $(pwd)/$BACKUP_DIR:/backup \
+  alpine tar -czf /backup/pb_data_$DATE.tar.gz -C /data .
+
+# 删除 7 天前的备份
+find "$BACKUP_DIR" -name "pb_data_*.tar.gz" -mtime +7 -delete
+
+echo "Backup completed: pb_data_$DATE.tar.gz"
+```
+
+## 镜像优化
+
+### 多阶段构建
+
+```dockerfile
+# 构建阶段
+FROM golang:1.21-alpine AS builder
+
+# 安装依赖
+RUN apk add --no-cache git make
+
+# 克隆源码
+ARG PB_VERSION=0.22.0
+RUN git clone --depth 1 --branch v${PB_VERSION} https://github.com/pocketbase/pocketbase.git
+
+# 构建
+WORKDIR /pocketbase
+RUN make build
+
+# 运行阶段
+FROM alpine:latest
+
+RUN apk add --no-cache ca-certificates tzdata
+
+# 设置时区
+RUN cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+    echo "Asia/Shanghai" > /etc/timezone && \
+    apk del tzdata
+
+WORKDIR /pb
+
+# 从构建阶段复制二进制文件
+COPY --from=builder /pocketbase/pocketbase .
+
+# 创建非 root 用户
+RUN addgroup -g 1000 pocketbase && \
+    adduser -D -u 1000 -G pocketbase pocketbase && \
+    chown -R pocketbase:pocketbase /pb
+
+USER pocketbase
+
+EXPOSE 8090
+
+VOLUME ["/pb/pb_data"]
+
+CMD ["./pocketbase", "serve", "--http=0.0.0.0:8090"]
+```
+
+## 监控与日志
+
+### 查看日志
+
+```bash
+# 查看容器日志
+docker logs pocketbase
+
+# 实时跟踪日志
+docker logs -f pocketbase
+
+# 查看最近 100 行日志
+docker logs --tail 100 pocketbase
+
+# 带时间戳的日志
+docker logs -t pocketbase
+```
+
+### 健康检查
+
+```bash
+# 手动触发健康检查
+docker exec pocketbase wget -q -O- http://localhost:8090/api/health
+
+# 查看健康状态
+docker inspect --format='{{.State.Health.Status}}' pocketbase
+```
+
+## 常见问题
+
+### Q: 如何自定义启动参数？
+
+在 docker-compose.yml 中修改 `command`：
+
+```yaml
+services:
+  pocketbase:
+    command: ["./pocketbase", "serve", "--http=0.0.0.0:8090", "--debug=false"]
+```
+
+### Q: 如何在容器内执行命令？
+
+```bash
+# 进入容器 shell
+docker exec -it pocketbase sh
+
+# 执行单个命令
+docker exec pocketbase ls -la /pb/pb_data
+```
+
+### Q: 如何迁移现有数据？
+
+```bash
+# 停止容器
+docker-compose down
+
+# 复制数据到挂载目录
+cp -r /path/to/old/pb_data/* ./pb_data/
+
+# 重新启动
+docker-compose up -d
+```
+
+### Q: 内存限制设置？
+
+```yaml
+services:
+  pocketbase:
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+```

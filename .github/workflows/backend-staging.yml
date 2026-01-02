@@ -1,0 +1,161 @@
+name: Backend Deploy (Staging)
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "apps/backend/**"
+      - ".github/workflows/backend-staging.yml"
+      - "pnpm-lock.yaml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/backend/**"
+  workflow_dispatch:
+
+env:
+  PB_VERSION: "0.23.4"
+  STAGING_PORT: 8091
+
+jobs:
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: staging
+      url: https://staging.pocketbase.cn
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download PocketBase
+        run: pnpm backend:download
+
+      - name: Apply migrations
+        run: pnpm backend:migrate
+
+      - name: Run smoke tests
+        run: |
+          pnpm backend:dev &
+          PB_PID=$!
+          echo "Started PocketBase with PID: $PB_PID"
+
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8090/api/live >/dev/null 2>&1; then
+              echo "PocketBase is ready"
+              break
+            fi
+            echo "Waiting for PocketBase... ($i/30)"
+            sleep 1
+          done
+
+          pnpm backend:smoke
+          kill $PB_PID || true
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v2.0.0
+        with:
+          host: ${{ secrets.STAGING_SSH_HOST }}
+          port: ${{ secrets.STAGING_SSH_PORT || 22 }}
+          username: ${{ secrets.STAGING_SSH_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            echo "[staging] Starting deployment..."
+
+            STAGING_PATH="${{ env.DEPLOY_PATH }}-staging"
+            mkdir -p "$STAGING_PATH"
+
+            # Deploy new code
+            echo "[staging] Creating temporary deploy directory..."
+            DEPLOY_TEMP="$STAGING_PATH.deploy.tmp"
+            rm -rf "$DEPLOY_TEMP"
+            mkdir -p "$DEPLOY_TEMP"
+
+            echo "[staging] Downloading PocketBase binary..."
+            cd "$DEPLOY_TEMP"
+            PB_VERSION="${{ env.PB_VERSION }}"
+            PB_OS="linux"
+            PB_ARCH="$(uname -m)"
+            case "$PB_ARCH" in
+              x86_64|amd64) PB_ARCH="amd64" ;;
+              arm64|aarch64) PB_ARCH="arm64" ;;
+            esac
+
+            ZIP_NAME="pocketbase_${PB_VERSION}_${PB_OS}_${PB_ARCH}.zip"
+            URL="https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/${ZIP_NAME}"
+
+            curl -fsSL "$URL" -o "/tmp/$ZIP_NAME"
+            unzip -q "/tmp/$ZIP_NAME" -d "$DEPLOY_TEMP"
+            chmod +x "$DEPLOY_TEMP/pocketbase"
+            rm -f "/tmp/$ZIP_NAME"
+
+            echo "[staging] Deploying application files..."
+            rsync -av --delete \
+              --exclude='pb_data/' \
+              --exclude='pb_data.db' \
+              --exclude='auxiliary.db' \
+              --exclude='.env' \
+              --exclude='bin/' \
+              --exclude='node_modules/' \
+              /opt/pocketbase.deploy.repo/apps/backend/ "$DEPLOY_TEMP/"
+
+            cp "$DEPLOY_TEMP/pocketbase" "$STAGING_PATH/"
+
+            echo "[staging] Running migrations..."
+            cd "$DEPLOY_TEMP"
+            ./pocketbase migrate up \
+              --dir "$STAGING_PATH/pb_data" \
+              --hooksDir "$DEPLOY_TEMP/pb_hooks" \
+              --migrationsDir "$DEPLOY_TEMP/pb_migrations" \
+              --publicDir "$DEPLOY_TEMP/pb_public"
+
+            rsync -av "$DEPLOY_TEMP/pb_hooks/" "$STAGING_PATH/pb_hooks/"
+            rsync -av "$DEPLOY_TEMP/pb_migrations/" "$STAGING_PATH/pb_migrations/"
+            rsync -av "$DEPLOY_TEMP/pb_public/" "$STAGING_PATH/pb_public/"
+
+            rm -rf "$DEPLOY_TEMP"
+
+            echo "[staging] Restarting staging service..."
+            if systemctl status pocketbase-staging >/dev/null 2>&1; then
+              systemctl reload pocketbase-staging || systemctl restart pocketbase-staging
+            else
+              echo "[staging] Service not configured, skipping restart"
+            fi
+
+            echo "[staging] Deployment completed"
+
+  staging-health-check:
+    name: Staging Health Check
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    steps:
+      - name: Check health endpoint
+        run: |
+          sleep 5
+          curl -f ${{ secrets.STAGING_URL }}/api/live || exit 1
+          curl -f ${{ secrets.STAGING_URL }}/api/ready || exit 1
+
+      - name: Run smoke tests
+        env:
+          PB_URL: ${{ secrets.STAGING_URL }}
+        run: |
+          curl -fsS "$PB_URL/api/live" | jq .
+          curl -fsS "$PB_URL/api/ready" | jq .

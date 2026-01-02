@@ -1,0 +1,72 @@
+---
+title: 事件 Hooks（P2）
+description: PocketBase hooks 生命周期、常用钩子与实现安全校验/异步任务的模式。
+---
+
+本页对应 SEO 计划中的 **P2：Event Hooks**。PocketBase 的 hooks 可以理解为「在请求生命周期的关键节点插入逻辑」。
+
+## Request vs AfterSuccess（最重要的分界）
+
+- `*Request`：请求处理中（可以校验输入、改写字段、拒绝请求）
+- `*After...Success`：写入成功之后（适合做副作用：通知、抓取 README、同步外部信息）
+
+建议：
+
+- **主流程不可失败** 的逻辑（例如 README 抓取）放在 `After...Success`，并做 best-effort。
+- **安全/权限/字段约束** 必须放在 `*Request`（可阻止非法写入）。
+
+## 常用 hooks（按你最常用的顺序）
+
+### `onRecordCreateRequest(handler, ...tags)`
+
+用于：创建前的校验、补齐默认字段、收口用户可写字段。
+
+本项目示例：`apps/backend/pb_hooks/15_moderation.pb.js`、`apps/backend/pb_hooks/60_comments.pb.js`。
+
+要点：在 `RecordRequestEvent` 中可以直接访问 `e.auth`（当前登录用户），不需要从 httpContext 取。
+
+### `onRecordUpdateRequest(...)`
+
+用于：更新时禁止非 staff 修改 `status/featured/author/slug` 等关键字段。
+
+示例：`apps/backend/pb_hooks/15_moderation.pb.js` 里对 `plugins/showcase` 的保护。
+
+### `onRecordAfterCreateSuccess(...)` / `onRecordAfterUpdateSuccess(...)`
+
+用于：写入成功后做副作用（抓取 README、同步 GitHub stars）。
+
+示例：
+
+- README：`apps/backend/pb_hooks/70_readme_fetcher.pb.js`
+- GitHub meta：`apps/backend/pb_hooks/72_github_meta_fetcher.pb.js`
+
+这类 hook 内写回数据库时，建议用：
+
+```js
+(e.app || $app).unsafeWithoutHooks().save(e.record);
+```
+
+避免触发自身 hook 造成循环。
+
+## 设计模式：写入保护（推荐）
+
+当一个集合对外开放 create/update（如插件/案例/评论），你通常要保证：
+
+- 作者字段始终等于当前登录用户
+- 审核字段只能由 staff 修改
+- slug 等关键路由字段对非 staff 保持稳定
+
+这类规则仅靠 collection rule 很难覆盖所有边界，**用 hooks 补齐是最稳的**。
+
+## 设计模式：副作用异步化（推荐）
+
+副作用常见：
+
+- 外部 API 调用（GitHub）
+- 邮件通知（Resend）
+- 统计聚合
+
+建议：
+
+- 避免在主请求里阻塞太久（设置超时、失败可忽略）
+- 为外部调用加限流/缓存（防止被恶意触发）

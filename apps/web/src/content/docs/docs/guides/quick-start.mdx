@@ -1,0 +1,48 @@
+---
+title: PocketBase 快速入门教程 - 10分钟构建后端 API
+description: 10 分钟快速上手 PocketBase：创建数据集合、配置访问规则、使用 JavaScript SDK 实现 CRUD 操作、文件上传和实时数据订阅，附完整代码示例。
+---
+
+## 1) 创建集合
+
+在 Admin UI 中创建集合（例如 `posts`），添加字段：
+
+- `title`（text）
+- `content`（editor）
+- `cover`（file，可选）
+
+## 2) 写访问规则（示例）
+
+最常见的规则模型：
+
+- 未登录用户：只允许读取已发布内容
+- 登录用户：允许创建与更新自己的内容
+
+你可以从「全开放」开始，再逐步收紧规则。
+
+## 3) 用 Web SDK 读写记录
+
+```ts
+import PocketBase from "pocketbase";
+
+const pb = new PocketBase("http://127.0.0.1:8090");
+
+const list = await pb.collection("posts").getList(1, 20);
+```
+
+## 4) 文件上传
+
+```ts
+const form = new FormData();
+form.append("title", "Hello");
+form.append("cover", fileInput.files[0]);
+await pb.collection("posts").create(form);
+```
+
+## 5) 实时订阅
+
+```ts
+pb.collection("posts").subscribe("*", (e) => {
+  console.log("change:", e.action, e.record);
+});
+```

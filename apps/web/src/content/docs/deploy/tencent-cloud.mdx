@@ -1,0 +1,479 @@
+---
+title: 腾讯云部署
+description: 在腾讯云 CVM 服务器上部署 PocketBase，配合 COS 对象存储
+---
+
+本文档介绍如何在腾讯云服务器（CVM）上部署 PocketBase，并配置 COS 对象存储。
+
+## 服务器准备
+
+### 购买 CVM 实例
+
+**推荐配置：**
+
+| 配置项   | 入门级       | 生产级       |
+| -------- | ------------ | ------------ |
+| 实例规格 | 1核2GB       | 2核4GB       |
+| 操作系统 | Ubuntu 22.04 | Ubuntu 22.04 |
+| 系统盘   | 40GB SSD     | 40GB SSD     |
+| 带宽     | 1Mbps        | 3Mbps        |
+
+### 登录服务器
+
+```bash
+# 使用 SSH 密钥登录
+ssh -i /path/to/key.pem ubuntu@your-cvm-ip
+
+# 或使用密码登录
+ssh ubuntu@your-cvm-ip
+```
+
+## 系统初始化
+
+### 更新系统
+
+```bash
+sudo apt update && sudo apt upgrade -y
+
+# 安装常用工具
+sudo apt install -y curl wget vim git ufw fail2ban htop
+```
+
+### 配置防火墙
+
+```bash
+# 启用 UFW
+sudo ufw enable
+
+# 允许 SSH
+sudo ufw allow 22/tcp
+
+# 允许 HTTP 和 HTTPS
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+
+# 查看状态
+sudo ufw status
+```
+
+### 配置时区
+
+```bash
+# 设置时区为中国上海
+sudo timedatectl set-timezone Asia/Shanghai
+```
+
+## 安装 PocketBase
+
+### 下载并安装
+
+```bash
+# 创建应用目录
+sudo mkdir -p /opt/pocketbase
+cd /opt/pocketbase
+
+# 下载最新版本
+PB_VERSION=$(curl -s https://api.github.com/repos/pocketbase/pocketbase/releases/latest | grep 'tag_name' | cut -d\" -f4)
+wget https://github.com/pocketbase/pocketbase/releases/download/${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip
+
+# 解压
+unzip pocketbase_${PB_VERSION}_linux_amd64.zip
+rm pocketbase_${PB_VERSION}_linux_amd64.zip
+
+# 添加执行权限
+chmod +x pocketbase
+
+# 测试运行
+./pocketbase serve
+```
+
+## 配置 Systemd 服务
+
+### 创建服务文件
+
+```bash
+sudo vim /etc/systemd/system/pocketbase.service
+```
+
+```ini
+[Unit]
+Description=PocketBase Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/pocketbase
+ExecStart=/opt/pocketbase/pocketbase serve --http=127.0.0.1:8090
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pocketbase
+
+# 安全加固
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/pocketbase/pb_data
+
+# 资源限制
+LimitNOFILE=65535
+MemoryLimit=512M
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 启动服务
+
+```bash
+# 重新加载 systemd
+sudo systemctl daemon-reload
+
+# 启用服务
+sudo systemctl enable pocketbase
+
+# 启动服务
+sudo systemctl start pocketbase
+
+# 查看状态
+sudo systemctl status pocketbase
+
+# 查看日志
+sudo journalctl -u pocketbase -f
+```
+
+## 配置 Nginx 反向代理
+
+### 安装 Nginx
+
+```bash
+sudo apt install nginx -y
+```
+
+### 配置 SSL（使用 Certbot）
+
+```bash
+# 安装 Certbot
+sudo apt install certbot python3-certbot-nginx -y
+
+# 获取证书（替换为你的域名）
+sudo certbot --nginx -d your-domain.com -d www.your-domain.com
+
+# 自动续期
+sudo certbot renew --dry-run
+```
+
+### 配置 Nginx
+
+```bash
+sudo vim /etc/nginx/sites-available/pocketbase
+```
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name your-domain.com www.your-domain.com;
+
+    # SSL 证书
+    ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+
+    # SSL 配置
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # 安全头部
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    # 文件上传大小
+    client_max_body_size 10M;
+
+    # 日志
+    access_log /var/log/nginx/pocketbase-access.log;
+    error_log /var/log/nginx/pocketbase-error.log;
+
+    # 反向代理
+    location / {
+        proxy_pass http://127.0.0.1:8090;
+        proxy_http_version 1.1;
+
+        # WebSocket 支持
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # 标准头部
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+
+        # 超时设置
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}
+
+# HTTP 重定向到 HTTPS
+server {
+    listen 80;
+    server_name your-domain.com www.your-domain.com;
+    return 301 https://$server_name$request_uri;
+}
+```
+
+### 启用配置
+
+```bash
+# 创建符号链接
+sudo ln -s /etc/nginx/sites-available/pocketbase /etc/nginx/sites-enabled/
+
+# 测试配置
+sudo nginx -t
+
+# 重启 Nginx
+sudo systemctl restart nginx
+```
+
+## 配置安全组
+
+在腾讯云控制台配置安全组规则：
+
+| 协议类型 | 端口范围 | 授权对象  | 描述                    |
+| -------- | -------- | --------- | ----------------------- |
+| SSH      | 22/22    | 0.0.0.0/0 | 远程连接（建议限制 IP） |
+| HTTP     | 80/80    | 0.0.0.0/0 | Web 访问                |
+| HTTPS    | 443/443  | 0.0.0.0/0 | 安全 Web 访问           |
+
+**注意：** 不要开放 8090 端口到公网。
+
+## 腾讯云 COS 集成
+
+### 创建存储桶
+
+1. 登录腾讯云控制台
+2. 进入对象存储 COS
+3. 创建存储桶，选择公有读私有写
+4. 记录存储桶名称和区域
+
+### 获取访问密钥
+
+1. 进入「访问管理」->「API 密钥管理」
+2. 创建密钥或使用现有密钥
+3. 记录 SecretId 和 SecretKey
+
+### 配置 COS 存储
+
+创建扩展配置：
+
+```go
+// main.go
+package main
+
+import (
+    "log"
+
+    "github.com/pocketbase/pocketbase"
+    "github.com/pocketbase/pocketbase/plugins/s3storage"
+)
+
+func main() {
+    app := pocketbase.New()
+
+    // 配置腾讯云 COS
+    s3storage.Register(app, s3storage.Config{
+        AuthToken:       "your_secret_id",
+        AuthSecret:      "your_secret_key",
+        Bucket:          "your-bucket-1234567890",
+        Region:          "ap-guangzhou",
+        Endpoint:        "https://cos.ap-guangzhou.myqcloud.com",
+        ForcePathStyle:  false,
+    })
+
+    if err := app.Start(); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+### 环境变量配置
+
+```bash
+# /opt/pocketbase/.env
+COS_SECRET_ID=your_secret_id
+COS_SECRET_KEY=your_secret_key
+COS_BUCKET=your-bucket-1234567890
+COS_REGION=ap-guangzhou
+```
+
+```go
+// 使用环境变量
+import "os"
+
+s3storage.Register(app, s3storage.Config{
+    AuthToken:  os.Getenv("COS_SECRET_ID"),
+    AuthSecret: os.Getenv("COS_SECRET_KEY"),
+    Bucket:     os.Getenv("COS_BUCKET"),
+    Region:     os.Getenv("COS_REGION"),
+    Endpoint:   "https://cos." + os.Getenv("COS_REGION") + ".myqcloud.com",
+})
+```
+
+## 数据备份
+
+### 备份到 COS
+
+```bash
+#!/bin/bash
+# /opt/scripts/backup-to-cos.sh
+
+BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
+BACKUP_FILE="pocketbase_backup_${BACKUP_DATE}.tar.gz"
+PB_DATA_DIR="/opt/pocketbase/pb_data"
+COS_BUCKET="cos://your-bucket/backups"
+
+# 安装 COSCLI
+wget https://github.com/tencentyun/coscli/releases/download/v0.11.0-beta/coscli-linux -O /usr/local/bin/coscli
+chmod +x /usr/local/bin/coscli
+
+# 配置 COSCLI
+coscli config init
+
+# 创建备份
+tar -czf /tmp/${BACKUP_FILE} -C ${PB_DATA_DIR} .
+
+# 上传到 COS
+coscli cp /tmp/${BACKUP_FILE} ${COS_BUCKET}/${BACKUP_FILE}
+
+# 清理本地临时文件
+rm /tmp/${BACKUP_FILE}
+
+echo "Backup completed: ${BACKUP_FILE}"
+```
+
+### 定时备份
+
+```bash
+# 添加到 crontab
+crontab -e
+
+# 每天凌晨 3 点备份
+0 3 * * * /opt/scripts/backup-to-cos.sh >> /var/log/pb-backup.log 2>&1
+```
+
+### 使用云数据库备份
+
+腾讯云提供自动备份功能：
+
+1. 进入云服务器控制台
+2. 选择「备份」->「创建备份」
+3. 设置自动备份策略（如每天凌晨 2 点）
+
+## 性能优化
+
+### 启用 BBR
+
+```bash
+echo "net.core.default_qdisc=fq" | sudo tee -a /etc/sysctl.conf
+echo "net.ipv4.tcp_congestion_control=bbr" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+```
+
+### 调整文件描述符限制
+
+```bash
+sudo vim /etc/security/limits.conf
+
+# 添加以下内容
+* soft nofile 65535
+* hard nofile 65535
+```
+
+## 监控与告警
+
+### 腾讯云云监控
+
+1. 在 CVM 控制台启用云监控
+2. 安装监控插件：
+
+```bash
+sudo apt install tencent-cloud-monitor -y
+sudo systemctl start stargate
+sudo systemctl enable stargate
+```
+
+### 自定义监控脚本
+
+```bash
+#!/bin/bash
+# /opt/scripts/health-check.sh
+
+# 检查 PocketBase 服务状态
+if ! systemctl is-active --quiet pocketbase; then
+    echo "PocketBase is not running!"
+    systemctl restart pocketbase
+fi
+
+# 检查磁盘空间
+DISK_USAGE=$(df -h /opt/pocketbase | awk 'NR==2 {print $5}' | sed 's/%//')
+if [ $DISK_USAGE -gt 80 ]; then
+    echo "Disk usage is ${DISK_USAGE}%"
+fi
+```
+
+## 常见问题
+
+### Q: 域名解析如何配置？
+
+在腾讯云 DNS 控制台：
+
+1. 添加 A 记录
+2. 主机记录：`@` 和 `www`
+3. 记录值：你的 CVM 公网 IP
+
+### Q: 如何更新 PocketBase？
+
+```bash
+sudo systemctl stop pocketbase
+cd /opt/pocketbase
+cp -r pb_data pb_data.backup
+PB_VERSION=$(curl -s https://api.github.com/repos/pocketbase/pocketbase/releases/latest | grep 'tag_name' | cut -d\" -f4)
+wget https://github.com/pocketbase/pocketbase/releases/download/${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip
+unzip -o pocketbase_${PB_VERSION}_linux_amd64.zip
+rm pocketbase_${PB_VERSION}_linux_amd64.zip
+sudo systemctl start pocketbase
+```
+
+### Q: 如何查看日志？
+
+```bash
+# PocketBase 日志
+sudo journalctl -u pocketbase -f
+
+# Nginx 日志
+sudo tail -f /var/log/nginx/pocketbase-access.log
+sudo tail -f /var/log/nginx/pocketbase-error.log
+```
+
+### Q: 内存不足如何处理？
+
+```bash
+# 创建 2GB Swap
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```

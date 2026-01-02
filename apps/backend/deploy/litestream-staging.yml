@@ -1,0 +1,25 @@
+# Litestream replication config for PocketBase.cn Staging
+# Copy to /opt/pocketbase-staging/litestream.yml and fill in env vars in /opt/pocketbase-staging/.env
+
+dbs:
+  - path: /opt/pocketbase-staging/pb_data/data.db
+    replicas:
+      - type: s3
+        bucket: ${LITESTREAM_BUCKET}
+        path: litestream/data
+        endpoint: ${PB_S3_ENDPOINT}
+        region: auto
+        access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+        secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+        skip-verify: false
+
+  - path: /opt/pocketbase-staging/pb_data/auxiliary.db
+    replicas:
+      - type: s3
+        bucket: ${LITESTREAM_BUCKET}
+        path: litestream/auxiliary
+        endpoint: ${PB_S3_ENDPOINT}
+        region: auto
+        access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+        secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+        skip-verify: false

@@ -1,0 +1,29 @@
+---
+export const prerender = false;
+
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { POCKETBASE_URL } from "@/lib/constants/config";
+
+const token = Astro.url.searchParams.get("token") || "";
+let status = "missing";
+
+if (token) {
+  const res = await fetch(`${POCKETBASE_URL}/api/newsletter/unsubscribe?token=${encodeURIComponent(token)}`);
+  status = res.ok ? "unsubscribed" : "failed";
+}
+---
+
+<BaseLayout title="退订 - PocketBase.cn" description="退订 PocketBase 版本更新通知。">
+  <h1 class="text-2xl font-semibold tracking-tight">退订</h1>
+  {status === "unsubscribed" ? (
+    <p class="mt-3 text-neutral-700 dark:text-neutral-300">已退订。你将不再收到版本更新邮件。</p>
+  ) : status === "failed" ? (
+    <p class="mt-3 text-neutral-700 dark:text-neutral-300">退订失败，链接可能已失效。</p>
+  ) : (
+    <p class="mt-3 text-neutral-700 dark:text-neutral-300">缺少 token 参数。</p>
+  )}
+  <div class="mt-6">
+    <a class="text-brand-700 hover:underline dark:text-brand-300" href="/">返回首页</a>
+  </div>
+</BaseLayout>
+

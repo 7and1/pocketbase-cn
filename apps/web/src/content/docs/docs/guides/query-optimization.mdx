@@ -1,0 +1,516 @@
+---
+title: 查询优化指南
+description: 优化 PocketBase 查询性能，提升应用响应速度
+---
+
+PocketBase 使用 SQLite 作为底层存储，了解查询优化技巧可以显著提升应用性能。
+
+## 性能基础
+
+### 查询执行流程
+
+```
+客户端请求 → API 规则检查 → 数据库查询 → 结果返回
+```
+
+优化点：
+
+1. 减少不必要的请求
+2. 优化数据库查询
+3. 减少返回数据量
+4. 合理使用缓存
+
+## 索引优化
+
+### 创建索引
+
+索引能显著提升查询性能，但会增加写入开销。
+
+**何时需要索引：**
+
+- 高频过滤字段
+- 排序字段
+- 关联查询的外键
+- 唯一性约束字段
+
+**索引类型：**
+
+```javascript
+// 单列索引
+{
+  "name": "status_idx",
+  "type": "index",
+  "options": {
+    "fields": ["status"]
+  }
+}
+
+// 复合索引
+{
+  "name": "user_resource_idx",
+  "type": "index",
+  "options": {
+    "fields": ["userId", "resourceId"],
+    "unique": true
+  }
+}
+
+// 唯一索引
+{
+  "name": "slug_unique",
+  "type": "index",
+  "options": {
+    "fields": ["slug"],
+    "unique": true
+  }
+}
+```
+
+### 复合索引顺序
+
+复合索引的字段顺序很重要：
+
+```javascript
+// 好的设计
+// 查询: filter=status='published' && sort=-publishedAt
+{
+  "name": "posts_list_idx",
+  "type": "index",
+  "options": {
+    "fields": ["status", "publishedAt"]
+  }
+}
+
+// 不好的设计
+// 反转顺序无法优化查询
+{
+  "name": "bad_idx",
+  "type": "index",
+  "options": {
+    "fields": ["publishedAt", "status"]
+  }
+}
+```
+
+### 常见索引模式
+
+```javascript
+// 用户登录优化
+{
+  "name": "user_email_idx",
+  "type": "index",
+  "options": {
+    "fields": ["email"],
+    "unique": true
+  }
+}
+
+// 文章列表查询优化
+{
+  "name": "posts_status_created_idx",
+  "type": "index",
+  "options": {
+    "fields": ["status", "created"]
+  }
+}
+
+// 关联查询优化
+{
+  "name": "posts_author_idx",
+  "type": "index",
+  "options": {
+    "fields": ["authorId", "created"]
+  }
+}
+```
+
+## 查询优化
+
+### 减少返回数据
+
+使用 `fields` 参数只获取需要的字段：
+
+```javascript
+// 不好的做法：获取所有字段
+const records = await pb.collection("posts").getList(1, 20);
+
+// 好的做法：只获取需要的字段
+const records = await pb.collection("posts").getList(1, 20, {
+  fields: "id,title,slug,created",
+});
+```
+
+### 跳过总数计算
+
+对于无需总数的场景，使用 `skipTotal`：
+
+```javascript
+// 不好的做法：每次都计算总数
+const records = await pb.collection("posts").getList(1, 50);
+
+// 好的做法：跳过总数计算
+const records = await pb.collection("posts").getList(1, 50, {
+  skipTotal: true,
+});
+```
+
+### 分页策略
+
+```javascript
+// 方案 1: 基于偏移的分页
+let page = 1;
+const result = await pb.collection("posts").getList(page, 20);
+
+// 方案 2: 基于游标的分页（更适合大数据量）
+const result = await pb.collection("posts").getList(1, 20, {
+  filter: `created < '${lastTimestamp}'`,
+  sort: "-created",
+});
+```
+
+### 过滤优化
+
+```javascript
+// 不好的做法：OR 条件
+await pb.collection("posts").getList(1, 20, {
+  filter: "status = 'published' || status = 'featured'",
+});
+
+// 好的做法：使用 IN
+await pb.collection("posts").getList(1, 20, {
+  filter: "status IN ('published', 'featured')",
+});
+```
+
+### 批量操作
+
+```javascript
+// 不好的做法：循环查询
+for (const id of ids) {
+  const record = await pb.collection("posts").getOne(id);
+}
+
+// 好的做法：使用过滤批量获取
+const records = await pb.collection("posts").getList(1, 50, {
+  filter: ids.map((id) => `id = '${id}'`).join(" || "),
+});
+```
+
+## 关联查询优化
+
+### 控制 Expand 深度
+
+```javascript
+// 不好的做法：过深的嵌套
+await pb.collection("posts").getList(1, 20, {
+  expand: "author.profile.avatar,category.parent,comments.author.profile",
+});
+
+// 好的做法：限制嵌套深度
+await pb.collection("posts").getList(1, 20, {
+  expand: "author,category",
+});
+```
+
+### 分步查询替代深度 Expand
+
+```javascript
+// 不好的做法：一次查询获取所有关联
+const posts = await pb.collection("posts").getList(1, 20, {
+  expand: "author.profile.comments.post",
+});
+
+// 好的做法：分步查询
+const posts = await pb.collection("posts").getList(1, 20, {
+  expand: "author",
+});
+const authorIds = posts.items.map((p) => p.author);
+const authors = await pb.collection("users").getList(1, 50, {
+  filter: authorIds.map((id) => `id = '${id}'`).join(" || "),
+});
+```
+
+## 缓存策略
+
+### 客户端缓存
+
+```javascript
+// 简单的内存缓存
+const cache = new Map();
+const CACHE_TTL = 60000; // 1 分钟
+
+async function getCachedPosts() {
+  const cached = cache.get("posts");
+  if (cached && Date.now() - cached.time < CACHE_TTL) {
+    return cached.data;
+  }
+
+  const posts = await pb.collection("posts").getList(1, 20, {
+    filter: "status = 'published'",
+  });
+  cache.set("posts", { data: posts, time: Date.now() });
+  return posts;
+}
+```
+
+### 条件请求
+
+```javascript
+// 使用 ETag 或 Last-Modified
+const posts = await pb.collection("posts").getList(1, 20, {
+  headers: {
+    "If-None-Match": etag,
+  },
+});
+```
+
+### 缓存不常变化的数据
+
+```javascript
+// 配置、分类等不常变化的数据
+let categoriesCache = null;
+
+async function getCategories() {
+  if (!categoriesCache) {
+    categoriesCache = await pb.collection("categories").getList(1, 50);
+  }
+  return categoriesCache;
+}
+```
+
+## 实时订阅优化
+
+### 按需订阅
+
+```javascript
+// 不好的做法：订阅所有事件
+pb.collection("posts").subscribe("*", callback);
+
+// 好的做法：只订阅需要的事件
+pb.collection("posts").subscribe("update", callback);
+pb.collection("posts").subscribe("delete", callback);
+```
+
+### 使用过滤订阅
+
+```javascript
+// 只订阅特定记录的更新
+pb.collection("posts").subscribe(`id = '${postId}'`, callback);
+
+// 只订阅特定状态的记录
+pb.collection("posts").subscribe("status = 'published'", callback);
+```
+
+### 取消订阅
+
+```javascript
+// 组件卸载时取消订阅
+let subscription = null;
+
+onMounted(() => {
+  subscription = pb.collection("posts").subscribe("*", callback);
+});
+
+onUnmounted(() => {
+  subscription?.unsubscribe();
+});
+```
+
+## 数据库优化
+
+### Vacuum 数据库
+
+```bash
+# 定期执行 vacuum 优化数据库
+./pocketbase db vacuum
+```
+
+### 分析查询性能
+
+```bash
+# 启用查询日志
+./pocketbase serve --logLevel=debug
+```
+
+### 数据库连接池
+
+PocketBase 使用单文件 SQLite，无需配置连接池。
+
+## 监控与诊断
+
+### 记录慢查询
+
+```javascript
+// 在 Hooks 中记录慢查询
+onRecordListRequest((e) => {
+  const start = Date.now();
+  e.next()?.then(() => {
+    const duration = Date.now() - start;
+    if (duration > 1000) {
+      console.warn(`Slow query: ${e.http.Request().URL} (${duration}ms)`);
+    }
+  });
+});
+```
+
+### 监控查询数量
+
+```javascript
+// 记录 API 请求数量
+let requestCount = 0;
+
+pb.beforeSend = function (url) {
+  requestCount++;
+  console.log(`Request ${requestCount}:`, url);
+};
+```
+
+## 性能测试
+
+### 压力测试
+
+```bash
+# 使用 wrk 进行压力测试
+wrk -t4 -c100 -d30s http://localhost:8090/api/collections/posts/records
+```
+
+### 基准测试
+
+```javascript
+// 测试查询性能
+async function benchmark() {
+  const iterations = 100;
+  const start = Date.now();
+
+  for (let i = 0; i < iterations; i++) {
+    await pb.collection("posts").getList(1, 20);
+  }
+
+  const duration = Date.now() - start;
+  console.log(`Average: ${duration / iterations}ms per query`);
+}
+```
+
+## 最佳实践
+
+### 1. 合理设计数据结构
+
+```javascript
+// 好的设计：扁平结构
+{
+  "title": "Post Title",
+  "authorId": "user_id",
+  "status": "published"
+}
+
+// 不好的设计：深层嵌套
+{
+  "title": "Post Title",
+  "author": {
+    "id": "user_id",
+    "name": "Author Name",
+    "profile": {
+      "avatar": "...",
+      "bio": "..."
+    }
+  }
+}
+```
+
+### 2. 使用批量操作
+
+```javascript
+// 批量创建
+const promises = data.map((item) => pb.collection("posts").create(item));
+await Promise.all(promises);
+```
+
+### 3. 避免过度查询
+
+```javascript
+// 使用防抖减少请求
+const debouncedSearch = debounce(async (query) => {
+  return await pb.collection("posts").getList(1, 20, {
+    filter: `title ~ '${query}'`,
+  });
+}, 300);
+```
+
+### 4. 合理使用分页
+
+```javascript
+// 不要一次性加载所有数据
+// 好的做法：使用分页或无限滚动
+const result = await pb.collection("posts").getList(page, 20);
+```
+
+## 性能指标
+
+### 推荐指标
+
+| 指标         | 目标值  |
+| ------------ | ------- |
+| API 响应时间 | < 200ms |
+| 列表查询     | < 500ms |
+| 单条记录查询 | < 100ms |
+| 实时订阅延迟 | < 100ms |
+| 数据库写入   | < 50ms  |
+
+### 性能瓶颈识别
+
+1. **API 规则复杂**：简化规则逻辑
+2. **缺少索引**：为过滤字段添加索引
+3. **过深 Expand**：减少关联深度
+4. **大量数据返回**：使用 fields 限制
+5. **频繁查询**：增加缓存层
+
+## 常见问题
+
+### Q: 如何优化 LIKE 查询？
+
+SQLite 的 LIKE 查询较慢，考虑：
+
+```javascript
+// 不好的做法
+await pb.collection("posts").getList(1, 20, {
+  filter: "content ~ '%keyword%'",
+});
+
+// 好的做法：使用全文搜索扩展或外部搜索引擎
+```
+
+### Q: 如何处理百万级数据？
+
+考虑：
+
+1. 分表/分库
+2. 使用专业的 PostgreSQL/MySQL
+3. 实现数据归档策略
+
+### Q: 为什么查询突然变慢？
+
+检查：
+
+1. 是否添加了新的复杂规则
+2. 数据量是否增长过快
+3. 索引是否正常工作
+4. 是否有其他资源竞争
+
+### Q: 如何减少实时订阅的服务器负载？
+
+1. 使用过滤订阅
+2. 降低订阅频率
+3. 使用轮询替代（对于非关键数据）
+
+```javascript
+// 轮询实现
+setInterval(async () => {
+  const result = await pb.collection("posts").getList(1, 1, {
+    filter: `created > '${lastCheck}'`,
+  });
+  if (result.items.length > 0) {
+    // 处理新数据
+    lastCheck = new Date().toISOString();
+  }
+}, 5000);
+```

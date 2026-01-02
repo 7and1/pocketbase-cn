@@ -1,0 +1,54 @@
+# PocketBase.cn Backend Docker Compose
+# Production: connects to nginx-proxy_default for public access
+# Usage:
+#   docker-compose up -d
+#   docker-compose logs -f pocketbase
+
+services:
+  pocketbase:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: pocketbase-cn:0.26.1
+    container_name: pocketbase-cn
+    restart: unless-stopped
+    expose:
+      - "8090"
+    volumes:
+      # Persist database - bind mount for easy backup
+      - ./data/pb_data:/opt/pocketbase/pb_data
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Shanghai
+      # nginx-proxy settings
+      - VIRTUAL_HOST=api.pocketbase.cn
+      - VIRTUAL_PORT=8090
+      - LETSENCRYPT_HOST=api.pocketbase.cn
+      - LETSENCRYPT_EMAIL=admin@pocketbase.cn
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:8090/api/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - proxy-tier
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  proxy-tier:
+    external: true
+    name: nginx-proxy_default

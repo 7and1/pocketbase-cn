@@ -1,0 +1,439 @@
+---
+title: 阿里云 ECS 部署
+description: 在阿里云 ECS 服务器上部署 PocketBase 的完整指南
+---
+
+本文档介绍如何在阿里云 ECS 服务器上部署 PocketBase，包括服务器配置、安全组设置、反向代理配置等。
+
+## 服务器准备
+
+### 购买 ECS 实例
+
+**推荐配置：**
+
+| 配置项   | 入门级       | 生产级       |
+| -------- | ------------ | ------------ |
+| 实例规格 | 1核2GB       | 2核4GB       |
+| 操作系统 | Ubuntu 22.04 | Ubuntu 22.04 |
+| 系统盘   | 40GB SSD     | 40GB SSD     |
+| 带宽     | 1Mbps        | 3Mbps        |
+
+### 登录服务器
+
+```bash
+# 使用 SSH 密钥登录
+ssh -i /path/to/key.pem root@your-ecs-ip
+
+# 或使用密码登录
+ssh root@your-ecs-ip
+```
+
+## 系统初始化
+
+### 更新系统
+
+```bash
+# 更新软件包
+apt update && apt upgrade -y
+
+# 安装常用工具
+apt install -y curl wget vim git ufw fail2ban htop
+```
+
+### 配置防火墙
+
+```bash
+# 启用 UFW
+ufw enable
+
+# 允许 SSH
+ufw allow 22/tcp
+
+# 允许 HTTP 和 HTTPS
+ufw allow 80/tcp
+ufw allow 443/tcp
+
+# 查看状态
+ufw status
+```
+
+### 配置时区
+
+```bash
+# 设置时区为中国上海
+timedatectl set-timezone Asia/Shanghai
+
+# 验证
+date
+```
+
+## 安装 PocketBase
+
+### 下载并安装
+
+```bash
+# 创建应用目录
+mkdir -p /opt/pocketbase
+cd /opt/pocketbase
+
+# 下载最新版本
+PB_VERSION=$(curl -s https://api.github.com/repos/pocketbase/pocketbase/releases/latest | grep 'tag_name' | cut -d\" -f4)
+wget https://github.com/pocketbase/pocketbase/releases/download/${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip
+
+# 解压
+unzip pocketbase_${PB_VERSION}_linux_amd64.zip
+rm pocketbase_${PB_VERSION}_linux_amd64.zip
+
+# 添加执行权限
+chmod +x pocketbase
+
+# 测试运行
+./pocketbase serve
+```
+
+## 配置 Systemd 服务
+
+### 创建服务文件
+
+```bash
+vim /etc/systemd/system/pocketbase.service
+```
+
+```ini
+[Unit]
+Description=PocketBase Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/pocketbase
+ExecStart=/opt/pocketbase/pocketbase serve --http=127.0.0.1:8090
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pocketbase
+
+# 安全加固
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/pocketbase/pb_data
+
+# 资源限制
+LimitNOFILE=65535
+MemoryLimit=512M
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 启动服务
+
+```bash
+# 重新加载 systemd
+systemctl daemon-reload
+
+# 启用服务
+systemctl enable pocketbase
+
+# 启动服务
+systemctl start pocketbase
+
+# 查看状态
+systemctl status pocketbase
+
+# 查看日志
+journalctl -u pocketbase -f
+```
+
+## 配置 Nginx 反向代理
+
+### 安装 Nginx
+
+```bash
+apt install nginx -y
+```
+
+### 配置 SSL（使用 Let's Encrypt）
+
+```bash
+# 安装 Certbot
+apt install certbot python3-certbot-nginx -y
+
+# 获取证书（替换为你的域名）
+certbot --nginx -d your-domain.com -d www.your-domain.com
+
+# 自动续期
+certbot renew --dry-run
+```
+
+### 配置 Nginx
+
+```bash
+vim /etc/nginx/sites-available/pocketbase
+```
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name your-domain.com www.your-domain.com;
+
+    # SSL 证书
+    ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+
+    # SSL 配置
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # 安全头部
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    # 文件上传大小
+    client_max_body_size 10M;
+
+    # 日志
+    access_log /var/log/nginx/pocketbase-access.log;
+    error_log /var/log/nginx/pocketbase-error.log;
+
+    # 反向代理
+    location / {
+        proxy_pass http://127.0.0.1:8090;
+        proxy_http_version 1.1;
+
+        # WebSocket 支持
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # 标准头部
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+
+        # 超时设置
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}
+
+# HTTP 重定向到 HTTPS
+server {
+    listen 80;
+    server_name your-domain.com www.your-domain.com;
+    return 301 https://$server_name$request_uri;
+}
+```
+
+### 启用配置
+
+```bash
+# 创建符号链接
+ln -s /etc/nginx/sites-available/pocketbase /etc/nginx/sites-enabled/
+
+# 测试配置
+nginx -t
+
+# 重启 Nginx
+systemctl restart nginx
+```
+
+## 配置阿里云安全组
+
+### 添加入方向规则
+
+在阿里云控制台配置安全组规则：
+
+| 协议类型 | 端口范围 | 授权对象  | 描述                    |
+| -------- | -------- | --------- | ----------------------- |
+| SSH      | 22/22    | 0.0.0.0/0 | 远程连接（建议限制 IP） |
+| HTTP     | 80/80    | 0.0.0.0/0 | Web 访问                |
+| HTTPS    | 443/443  | 0.0.0.0/0 | 安全 Web 访问           |
+
+**注意：** 不要开放 8090 端口到公网，只允许本地访问。
+
+## 数据备份
+
+### 使用 OSS 备份
+
+安装阿里云 CLI：
+
+```bash
+# 安装
+wget https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz
+tar -xzf aliyun-cli-linux-latest-amd64.tgz
+sudo mv aliyun /usr/local/bin/
+
+# 配置
+aliyun configure
+```
+
+备份脚本：
+
+```bash
+#!/bin/bash
+# /opt/scripts/backup-to-oss.sh
+
+BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
+BACKUP_FILE="pocketbase_backup_${BACKUP_DATE}.tar.gz"
+PB_DATA_DIR="/opt/pocketbase/pb_data"
+OSS_BUCKET="oss://your-bucket/backups"
+
+# 创建备份
+tar -czf /tmp/${BACKUP_FILE} -C ${PB_DATA_DIR} .
+
+# 上传到 OSS
+aliyun oss cp /tmp/${BACKUP_FILE} ${OSS_BUCKET}/${BACKUP_FILE}
+
+# 清理本地临时文件
+rm /tmp/${BACKUP_FILE}
+
+# 清理 30 天前的备份
+aliyun oss ls ${OSS_BUCKET} | awk '{print $5}' | while read file; do
+    # 删除旧文件逻辑
+done
+```
+
+设置定时任务：
+
+```bash
+# 添加到 crontab
+crontab -e
+
+# 每天凌晨 3 点备份
+0 3 * * * /opt/scripts/backup-to-oss.sh >> /var/log/pb-backup.log 2>&1
+```
+
+### 使用快照备份
+
+在阿里云控制台：
+
+1. 进入 ECS 实例
+2. 选择「磁盘」->「创建快照」
+3. 设置自动快照策略（如每天凌晨 2 点）
+
+## 性能优化
+
+### 启用 BBR
+
+```bash
+# 启用 TCP BBR
+echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+sysctl -p
+
+# 验证
+sysctl net.ipv4.tcp_congestion_control
+```
+
+### 调整文件描述符限制
+
+```bash
+# 编辑 limits.conf
+vim /etc/security/limits.conf
+
+# 添加以下内容
+* soft nofile 65535
+* hard nofile 65535
+```
+
+## 监控
+
+### 阿里云云监控
+
+1. 在 ECS 控制台启用云监控
+2. 安装云监控插件
+
+```bash
+# 安装云监控插件
+wget https://cms-agent-cn-hangzhou.oss-cn-hangzhou.aliyuncs.com/agent/install/cms_agent_install.sh
+bash cms_agent_install.sh
+```
+
+### 自定义监控脚本
+
+```bash
+#!/bin/bash
+# /opt/scripts/health-check.sh
+
+# 检查 PocketBase 服务状态
+if ! systemctl is-active --quiet pocketbase; then
+    echo "PocketBase is not running!" | mail -s "Alert: PocketBase Down" admin@example.com
+    systemctl restart pocketbase
+fi
+
+# 检查磁盘空间
+DISK_USAGE=$(df -h /opt/pocketbase | awk 'NR==2 {print $5}' | sed 's/%//')
+if [ $DISK_USAGE -gt 80 ]; then
+    echo "Disk usage is ${DISK_USAGE}%" | mail -s "Alert: High Disk Usage" admin@example.com
+fi
+```
+
+## 常见问题
+
+### Q: 域名解析如何配置？
+
+在阿里云 DNS 控制台：
+
+1. 添加 A 记录
+2. 主机记录：`@` 和 `www`
+3. 记录值：你的 ECS 公网 IP
+
+### Q: 如何更新 PocketBase？
+
+```bash
+# 停止服务
+systemctl stop pocketbase
+
+# 备份数据
+cp -r /opt/pocketbase/pb_data /opt/pocketbase/pb_data.backup
+
+# 下载新版本
+cd /opt/pocketbase
+PB_VERSION=$(curl -s https://api.github.com/repos/pocketbase/pocketbase/releases/latest | grep 'tag_name' | cut -d\" -f4)
+wget https://github.com/pocketbase/pocketbase/releases/download/${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip
+unzip -o pocketbase_${PB_VERSION}_linux_amd64.zip
+rm pocketbase_${PB_VERSION}_linux_amd64.zip
+
+# 重启服务
+systemctl start pocketbase
+```
+
+### Q: 如何查看日志？
+
+```bash
+# PocketBase 日志
+journalctl -u pocketbase -f
+
+# Nginx 日志
+tail -f /var/log/nginx/pocketbase-access.log
+tail -f /var/log/nginx/pocketbase-error.log
+```
+
+### Q: 内存不足如何处理？
+
+考虑升级实例规格，或添加 Swap：
+
+```bash
+# 创建 2GB Swap
+fallocate -l 2G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+
+# 永久生效
+echo '/swapfile none swap sw 0 0' >> /etc/fstab
+```

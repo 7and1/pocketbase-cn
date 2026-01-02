@@ -1,0 +1,74 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import PluginsBrowser from "@/components/plugins/PluginsBrowser";
+---
+
+<BaseLayout title="PocketBase 插件市场 - 社区扩展与工具集合" description="浏览和下载 PocketBase 社区插件，包括认证扩展、存储适配器、中间件等。发现精选插件，提升开发效率。">
+  <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">PocketBase 插件市场</h1>
+      <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+        发现社区贡献的 PocketBase 插件和扩展，加速您的开发流程。
+      </p>
+    </div>
+    <a
+      class="inline-flex items-center justify-center rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+      href="/plugins/submit"
+    >
+      提交插件
+    </a>
+  </div>
+
+  <!-- SEO Content Section -->
+  <section class="mt-8 rounded-xl border border-neutral-200 bg-neutral-50 p-6 dark:border-neutral-800 dark:bg-neutral-900">
+    <h2 class="text-lg font-semibold">什么是 PocketBase 插件？</h2>
+    <p class="mt-3 text-sm text-neutral-600 dark:text-neutral-400">
+      PocketBase 插件是由社区开发者创建的扩展模块，可以为 PocketBase 添加额外的功能和集成。插件可以帮助您快速实现常见功能，如第三方认证、云存储集成、邮件发送、短信验证等，而无需从头开始编写代码。
+    </p>
+
+    <h3 class="mt-6 text-md font-semibold">插件类型</h3>
+    <ul class="mt-3 grid gap-3 md:grid-cols-2 text-sm text-neutral-600 dark:text-neutral-400">
+      <li class="flex items-start gap-2">
+        <span class="text-brand-600">🔐</span>
+        <span><strong>认证插件：</strong>支持微信登录、支付宝登录、企业微信等国内 OAuth 提供商</span>
+      </li>
+      <li class="flex items-start gap-2">
+        <span class="text-brand-600">☁️</span>
+        <span><strong>存储插件：</strong>集成阿里云 OSS、腾讯云 COS、七牛云等对象存储服务</span>
+      </li>
+      <li class="flex items-start gap-2">
+        <span class="text-brand-600">📧</span>
+        <span><strong>邮件插件：</strong>支持腾讯云、阿里云、SendGrid 等邮件服务</span>
+      </li>
+      <li class="flex items-start gap-2">
+        <span class="text-brand-600">📱</span>
+        <span><strong>短信插件：</strong>集成国内短信服务商，支持验证码和通知</span>
+      </li>
+      <li class="flex items-start gap-2">
+        <span class="text-brand-600">🔔</span>
+        <span><strong>通知插件：</strong>支持微信公众号、钉钉、企业微信推送</span>
+      </li>
+      <li class="flex items-start gap-2">
+        <span class="text-brand-600">🛠️</span>
+        <span><strong>工具插件：</strong>数据迁移、备份恢复、性能监控等实用工具</span>
+      </li>
+    </ul>
+
+    <h3 class="mt-6 text-md font-semibold">如何使用插件</h3>
+    <ol class="mt-3 list-decimal pl-6 space-y-2 text-sm text-neutral-600 dark:text-neutral-400">
+      <li>浏览插件市场，找到您需要的插件</li>
+      <li>查看插件详情，了解功能和安装说明</li>
+      <li>根据插件类型，通过 JS Hooks 或 Go 扩展集成到您的 PocketBase 实例</li>
+      <li>按照插件文档进行配置即可使用</li>
+    </ol>
+
+    <h3 class="mt-6 text-md font-semibold">提交您的插件</h3>
+    <p class="mt-3 text-sm text-neutral-600 dark:text-neutral-400">
+      开发了有用的 PocketBase 插件？欢迎提交到我们的插件市场，帮助更多开发者！请确保插件代码质量良好，包含完整的文档和使用示例。
+    </p>
+  </section>
+
+  <div class="mt-6">
+    <PluginsBrowser client:load />
+  </div>
+</BaseLayout>

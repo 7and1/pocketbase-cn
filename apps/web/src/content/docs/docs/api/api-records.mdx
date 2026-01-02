@@ -1,0 +1,462 @@
+---
+title: Records API
+description: 完整的记录 CRUD 操作、过滤、排序、分页与关联查询指南
+---
+
+PocketBase Records API 提供标准的 REST 接口来操作集合中的记录。所有操作都支持完整的 CRUD（创建、读取、更新、删除）以及高级查询功能。
+
+## 基本路径
+
+```
+/api/collections/{collection}/records
+```
+
+## 列表查询
+
+### 基本分页
+
+```http
+GET /api/collections/posts/records?page=1&perPage=20
+```
+
+**响应示例：**
+
+```json
+{
+  "page": 1,
+  "perPage": 20,
+  "totalItems": 150,
+  "totalPages": 8,
+  "items": [
+    {
+      "id": "rxk2z3j1w34o8vj",
+      "collectionId": "pbc_1234567890",
+      "collectionName": "posts",
+      "title": "Hello PocketBase",
+      "content": "...",
+      "created": "2024-01-15 10:30:00.000Z",
+      "updated": "2024-01-15 10:30:00.000Z"
+    }
+  ]
+}
+```
+
+### 简化列表（不分页）
+
+```http
+GET /api/collections/posts/records?skipTotal=1
+```
+
+设置 `skipTotal=1` 可以跳过 `totalItems` 计数，提高大数据集查询性能。
+
+## 过滤（Filter）
+
+### 基本过滤
+
+```http
+GET /api/collections/posts/records?filter=status='published'
+```
+
+### 比较运算符
+
+| 运算符 | 说明           | 示例                        |
+| ------ | -------------- | --------------------------- |
+| `=`    | 等于           | `filter=status='active'`    |
+| `!=`   | 不等于         | `filter=status!='draft'`    |
+| `>`    | 大于           | `filter=views>100`          |
+| `>=`   | 大于等于       | `filter=views>=100`         |
+| `<`    | 小于           | `filter=price<50`           |
+| `<=`   | 小于等于       | `filter=price<=50`          |
+| `~`    | 包含（字符串） | `filter=title~'pocketbase'` |
+| `!~`   | 不包含         | `filter=title!~'test'`      |
+
+### 逻辑运算符
+
+```http
+# AND（默认空格分隔）
+GET /api/collections/posts/records?filter=status='published' && featured=true
+
+# OR
+GET /api/collections/posts/records?filter=status='draft' || status='archived'
+
+# 分组
+GET /api/collections/posts/records?filter=(status='published' && featured=true) || authorId='abc'
+```
+
+### 空值检查
+
+```http
+# 字段为空
+filter=publishedAt=null
+
+# 字段不为空
+filter=publishedAt!=null
+```
+
+### 数组字段过滤
+
+```http
+# 包含某个标签
+filter=tags~'javascript'
+
+# 多选字段包含某值
+filter=categories~'tech'
+```
+
+### 常见过滤模式
+
+```http
+# 按日期范围查询
+filter=created>='2024-01-01' && created<='2024-12-31'
+
+# 按用户过滤
+filter=authorId=@request.auth.id
+
+# 搜索多个字段
+filter=title~'search' || content~'search'
+
+# 组合多个条件
+filter=status='published' && publishedAt<='2024-01-15' && featured=true
+```
+
+## 排序（Sort）
+
+### 单字段排序
+
+```http
+# 升序
+GET /api/collections/posts/records?sort=created
+
+# 降序（减号前缀）
+GET /api/collections/posts/records?sort=-created
+```
+
+### 多字段排序
+
+```http
+# 先按状态降序，再按创建时间降序
+GET /api/collections/posts/records?sort=-status,-created
+
+# 复杂排序：featured 优先，然后按时间
+GET /api/collections/posts/records?sort=-featured,-created
+```
+
+### 支持随机排序
+
+```http
+GET /api/collections/posts/records?sort=@random
+```
+
+## 字段选择
+
+### 选择特定字段
+
+```http
+# 只返回 id 和 title
+GET /api/collections/posts/records?fields=id,title,created
+
+# 嵌套选择（relation 字段）
+GET /api/collections/posts/records?fields=id,title,author.name
+```
+
+### 排除字段
+
+```http
+# 排除 content 字段
+GET /api/collections/posts/records?fields=-content
+```
+
+## 关联查询（Relations）
+
+### 扩展关联字段
+
+```http
+# 扩展单个 relation
+GET /api/collections/posts/records?expand=author
+
+# 扩展多个 relation
+GET /api/collections/posts/records?expand=author,category
+
+# 嵌套扩展
+GET /api/collections/posts/records?expand=author.avatar
+```
+
+### 响应示例
+
+```json
+{
+  "items": [
+    {
+      "id": "rxk2z3j1w34o8vj",
+      "title": "Post Title",
+      "author": "author_id_here",
+      "expand": {
+        "author": {
+          "id": "author_id_here",
+          "name": "John Doe",
+          "email": "john@example.com"
+        }
+      }
+    }
+  ]
+}
+```
+
+## CRUD 操作
+
+### 创建记录
+
+```http
+POST /api/collections/posts/records
+Content-Type: application/json
+
+{
+  "title": "My First Post",
+  "content": "This is the content...",
+  "status": "draft",
+  "tags": ["javascript", "pocketbase"]
+}
+```
+
+**使用 FormData（文件上传）：**
+
+```http
+POST /api/collections/posts/records
+Content-Type: multipart/form-data
+
+------Boundary
+Content-Disposition: form-data; name="title"
+
+My First Post
+------Boundary
+Content-Disposition: form-data; name="cover"; filename="image.jpg"
+Content-Type: image/jpeg
+
+(binary data)
+------Boundary--
+```
+
+### 读取单条记录
+
+```http
+GET /api/collections/posts/records/{id}
+```
+
+### 更新记录
+
+```http
+PATCH /api/collections/posts/records/{id}
+Content-Type: application/json
+
+{
+  "title": "Updated Title",
+  "status": "published"
+}
+```
+
+### 删除记录
+
+```http
+DELETE /api/collections/posts/records/{id}
+```
+
+## 批量操作
+
+### 批量删除
+
+```http
+# 需要通过 filter 筛选
+DELETE /api/collections/posts/records?filter=status='spam'
+```
+
+**注意：** 批量操作受集合规则限制，确保规则允许此类操作。
+
+## SDK 使用示例
+
+### JavaScript SDK
+
+```javascript
+import PocketBase from "pocketbase";
+
+const pb = new PocketBase("http://127.0.0.1:8090");
+
+// 列表查询（带过滤和排序）
+const records = await pb.collection("posts").getList(1, 20, {
+  filter: 'status="published" && featured=true',
+  sort: "-created",
+  expand: "author,category",
+});
+
+// 简化列表
+const allRecords = await pb.collection("posts").getList(1, 50, {
+  skipTotal: true,
+});
+
+// 获取单条记录
+const record = await pb.collection("posts").getOne("record_id");
+
+// 创建记录
+const created = await pb.collection("posts").create({
+  title: "New Post",
+  content: "Content here...",
+  status: "draft",
+});
+
+// 更新记录
+const updated = await pb.collection("posts").update("record_id", {
+  title: "Updated Title",
+});
+
+// 删除记录
+await pb.collection("posts").delete("record_id");
+
+// 使用 FormData 创建（带文件）
+const formData = new FormData();
+formData.append("title", "Post with Image");
+formData.append("cover", fileInput.files[0]);
+const withFile = await pb.collection("posts").create(formData);
+```
+
+### Go SDK
+
+```go
+import "github.com/pocketbase/pocketbase/daos"
+
+// 列表查询
+records, err := dao.FindRecordsByFilter(
+    "posts",
+    "status='published' && featured=true",
+    "-created",
+    20,  // limit
+    0,   // offset
+)
+
+// 获取单条
+record, err := dao.FindRecordById("posts", "record_id")
+
+// 创建
+record := &models.Record{}
+record.SetData(map[string]any{
+    "title": "New Post",
+    "content": "Content...",
+})
+err := dao.CreateRecord(record)
+
+// 更新
+record.SetData(map[string]any{
+    "title": "Updated Title",
+})
+err := dao.SaveRecord(record)
+
+// 删除
+err := dao.DeleteRecord(record)
+```
+
+## 性能优化建议
+
+### 1. 合理使用索引
+
+为高频过滤和排序字段创建索引：
+
+- 状态字段（`status`）
+- 外键字段（`authorId`、`categoryId`）
+- 日期字段（`created`、`publishedAt`）
+- 搜索字段（`slug`）
+
+### 2. 减少返回数据
+
+使用 `fields` 参数只获取需要的字段：
+
+```http
+GET /api/collections/posts/records?fields=id,title,slug
+```
+
+### 3. 使用 skipTotal
+
+对于无需总数的场景，跳过计数：
+
+```http
+GET /api/collections/posts/records?skipTotal=1
+```
+
+### 4. 限制深度
+
+避免过深的 `expand` 嵌套，考虑多次查询或使用 GraphQL 风格的自定义接口。
+
+### 5. 缓存策略
+
+- 对于不常变化的数据，客户端缓存结果
+- 使用 `ETag` 或 `Last-Modified` 头实现条件请求
+- 考虑使用 PocketBase 的缓存中间件
+
+## 常见问题
+
+### Q: 如何实现全文搜索？
+
+PocketBase 使用 SQLite，默认支持简单的 `LIKE` 查询：
+
+```http
+filter=title~'keyword' || content~'keyword'
+```
+
+对于复杂全文搜索，可以考虑：
+
+- 使用 FTS5 扩展（需要自定义 PocketBase）
+- 集成专业搜索引擎（如 Meilisearch）
+- 使用外部搜索服务（如 Algolia）
+
+### Q: 如何处理分页中的数据变化？
+
+```javascript
+// 方案 1: 使用游标分页（基于时间戳）
+const records = await pb.collection("posts").getList(1, 50, {
+  filter: `created<'${lastTimestamp}'`,
+  sort: "-created",
+});
+
+// 方案 2: 客户端去重
+const ids = new Set();
+const uniqueRecords = records.items.filter((r) => {
+  if (ids.has(r.id)) return false;
+  ids.add(r.id);
+  return true;
+});
+```
+
+### Q: 如何实现"加载更多"？
+
+```javascript
+let page = 1;
+const perPage = 20;
+let hasMore = true;
+
+async function loadMore() {
+  if (!hasMore) return;
+
+  const result = await pb.collection("posts").getList(page, perPage);
+
+  result.items.forEach((item) => appendToList(item));
+
+  hasMore = result.items.length === perPage;
+  page++;
+}
+```
+
+### Q: relation 字段如何排序？
+
+```http
+# 主记录排序
+GET /api/collections/posts/records?sort=-created
+
+# 扩展的 relation 排序（需要在查询中处理）
+# 当前不支持直接在 expand 中排序，建议：
+# 1. 在数据库层面添加排序字段
+# 2. 或在前端对 expand 结果排序
+```
+
+## 安全建议
+
+1. **始终验证规则**：确保 API 规则与业务需求匹配
+2. **限制查询深度**：避免深层嵌套的 expand 导致性能问题
+3. **监控查询性能**：记录慢查询，优化索引
+4. **使用批量操作限制**：对批量删除/更新添加额外验证

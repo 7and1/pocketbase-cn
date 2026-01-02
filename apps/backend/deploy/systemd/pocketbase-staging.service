@@ -1,0 +1,25 @@
+[Unit]
+Description=PocketBase.cn Staging (PocketBase)
+After=network.target
+
+[Service]
+Type=simple
+User=pocketbase
+Group=pocketbase
+WorkingDirectory=/opt/pocketbase-staging
+EnvironmentFile=/opt/pocketbase-staging/.env
+
+# Staging listens on different port to avoid conflict with production
+ExecStart=/opt/pocketbase-staging/pocketbase serve \
+  --http=127.0.0.1:8091 \
+  --dir /opt/pocketbase-staging/pb_data \
+  --hooksDir /opt/pocketbase-staging/pb_hooks \
+  --migrationsDir /opt/pocketbase-staging/pb_migrations \
+  --publicDir /opt/pocketbase-staging/pb_public
+
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

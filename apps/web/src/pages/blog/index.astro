@@ -1,0 +1,219 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { getCollection } from "astro:content";
+import { SITE_URL } from "@/lib/constants/config";
+
+const POSTS_PER_PAGE = 12;
+
+const url = new URL(Astro.url);
+const pageParam = url.searchParams.get("page");
+const currentPage = Math.max(1, parseInt(pageParam || "1", 10));
+const categoryParam = url.searchParams.get("category");
+const tagParam = url.searchParams.get("tag");
+
+const allPosts = await getCollection("blog", ({ data }) => !data.draft);
+
+const filteredPosts = allPosts.filter((post) => {
+  if (categoryParam && post.data.category !== categoryParam) return false;
+  if (tagParam && !post.data.tags.includes(tagParam)) return false;
+  return true;
+});
+
+const sortedPosts = filteredPosts.sort((a, b) =>
+  b.data.publishDate.valueOf() - a.data.publishDate.valueOf()
+);
+
+const totalPages = Math.ceil(sortedPosts.length / POSTS_PER_PAGE);
+const validPage = Math.min(currentPage, totalPages || 1);
+
+const startIndex = (validPage - 1) * POSTS_PER_PAGE;
+const endIndex = startIndex + POSTS_PER_PAGE;
+const posts = sortedPosts.slice(startIndex, endIndex);
+
+const categories = [...new Set(allPosts.map((p) => p.data.category))];
+const allTags = [...new Set(allPosts.flatMap((p) => p.data.tags))];
+
+const paginationUrl = (pageNum: number) => {
+  const params = new URLSearchParams();
+  if (pageNum > 1) params.set("page", String(pageNum));
+  if (categoryParam) params.set("category", categoryParam);
+  if (tagParam) params.set("tag", tagParam);
+  const queryString = params.toString();
+  return `/blog${queryString ? `?${queryString}` : ""}`;
+};
+
+const hasFilters = categoryParam || tagParam;
+---
+
+<BaseLayout
+  title={`博客${hasFilters ? ` - ${categoryParam || tagParam}` : ""} - PocketBase.cn`}
+  description="PocketBase 技术文章、教程、最佳实践与对比分析。"
+>
+  <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">博客</h1>
+      <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+        技术文章、教程、最佳实践与对比分析
+      </p>
+    </div>
+  </div>
+
+  <div class="mt-6 flex flex-col gap-6 lg:flex-row">
+    <aside class="w-full lg:w-56 lg:flex-shrink-0">
+      <div class="rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
+        <h3 class="text-sm font-semibold">分类</h3>
+        <ul class="mt-3 space-y-2">
+          <li>
+            <a
+              href="/blog"
+              class={!categoryParam ? "font-medium text-brand-700 dark:text-brand-300" : "text-sm text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white"}
+            >
+              全部
+            </a>
+          </li>
+          {categories.map((cat) => (
+            <li>
+              <a
+                href={`/blog?category=${encodeURIComponent(cat)}`}
+                class={categoryParam === cat ? "font-medium text-brand-700 dark:text-brand-300" : "text-sm text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white"}
+              >
+                {cat}
+              </a>
+            </li>
+          ))}
+        </ul>
+
+        <h3 class="mt-6 text-sm font-semibold">标签</h3>
+        <div class="mt-3 flex flex-wrap gap-2">
+          {allTags.slice(0, 15).map((tag) => (
+            <a
+              href={`/blog?tag=${encodeURIComponent(tag)}`}
+              class={tagParam === tag
+                ? "rounded bg-brand-100 px-2 py-1 text-xs font-medium text-brand-800 dark:bg-brand-900 dark:text-brand-100"
+                : "rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+              }
+            >
+              {tag}
+            </a>
+          ))}
+        </div>
+      </div>
+    </aside>
+
+    <div class="flex-1">
+      {hasFilters ? (
+        <div class="mb-4 flex items-center gap-2 text-sm">
+          <span class="text-neutral-600 dark:text-neutral-400">筛选:</span>
+          {categoryParam && (
+            <span class="rounded bg-neutral-100 px-2 py-1 dark:bg-neutral-800">
+              分类: {categoryParam}
+              <a href="/blog" class="ml-2 text-neutral-500 hover:text-neutral-700">&times;</a>
+            </span>
+          )}
+          {tagParam && (
+            <span class="rounded bg-neutral-100 px-2 py-1 dark:bg-neutral-800">
+              标签: {tagParam}
+              <a href="/blog" class="ml-2 text-neutral-500 hover:text-neutral-700">&times;</a>
+            </span>
+          )}
+        </div>
+      ) : null}
+
+      {posts.length === 0 ? (
+        <div class="rounded-xl border border-neutral-200 p-8 text-center dark:border-neutral-800">
+          <p class="text-neutral-600 dark:text-neutral-400">暂无文章</p>
+        </div>
+      ) : (
+        <div class="grid gap-6">
+          {posts.map((post) => {
+            const publishDate = new Date(post.data.publishDate).toLocaleDateString("zh-CN", {
+              year: "numeric",
+              month: "long",
+              day: "numeric",
+            });
+
+            return (
+              <article class="group rounded-xl border border-neutral-200 p-5 transition-colors hover:border-neutral-300 dark:border-neutral-800 dark:hover:border-neutral-700">
+                <div class="flex items-start justify-between gap-4">
+                  <div class="flex-1">
+                    <div class="flex flex-wrap items-center gap-2 text-sm">
+                      <span class="rounded bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 dark:bg-brand-900/30 dark:text-brand-300">
+                        {post.data.category}
+                      </span>
+                      <time class="text-neutral-500 dark:text-neutral-400">
+                        {publishDate}
+                      </time>
+                    </div>
+
+                    <a href={`/blog/${post.slug}`}>
+                      <h2 class="mt-2 text-lg font-semibold group-hover:text-brand-700 dark:group-hover:text-brand-300">
+                        {post.data.title}
+                      </h2>
+                    </a>
+
+                    <p class="mt-2 line-clamp-2 text-sm text-neutral-600 dark:text-neutral-400">
+                      {post.data.description}
+                    </p>
+
+                    {post.data.tags.length > 0 ? (
+                      <div class="mt-3 flex flex-wrap gap-2">
+                        {post.data.tags.slice(0, 5).map((tag) => (
+                          <a
+                            href={`/blog?tag=${encodeURIComponent(tag)}`}
+                            class="text-xs text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-300"
+                          >
+                            #{tag}
+                          </a>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {post.data.featured ? (
+                    <span class="rounded bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+                      精选
+                    </span>
+                  ) : null}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {totalPages > 1 ? (
+        <nav class="mt-8 flex items-center justify-center gap-2">
+          {validPage > 1 ? (
+            <a
+              href={paginationUrl(validPage - 1)}
+              class="rounded-md border border-neutral-200 px-3 py-1.5 text-sm hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900"
+            >
+              上一页
+            </a>
+          ) : (
+            <span class="rounded-md border border-neutral-200 px-3 py-1.5 text-sm text-neutral-400 dark:border-neutral-800">
+              上一页
+            </span>
+          )}
+
+          <span class="text-sm text-neutral-600 dark:text-neutral-400">
+            第 {validPage} / {totalPages} 页
+          </span>
+
+          {validPage < totalPages ? (
+            <a
+              href={paginationUrl(validPage + 1)}
+              class="rounded-md border border-neutral-200 px-3 py-1.5 text-sm hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900"
+            >
+              下一页
+            </a>
+          ) : (
+            <span class="rounded-md border border-neutral-200 px-3 py-1.5 text-sm text-neutral-400 dark:border-neutral-800">
+              下一页
+            </span>
+          )}
+        </nav>
+      ) : null}
+    </div>
+  </div>
+</BaseLayout>

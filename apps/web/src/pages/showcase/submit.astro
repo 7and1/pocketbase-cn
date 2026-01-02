@@ -1,0 +1,15 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import ShowcaseSubmitForm from "@/components/showcase/ShowcaseSubmitForm";
+---
+
+<BaseLayout title="提交案例 - PocketBase.cn" description="提交 PocketBase 社区案例到 PocketBase.cn 展示。">
+  <h1 class="text-2xl font-semibold tracking-tight">提交案例</h1>
+  <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+    提交后默认进入 <strong>pending</strong> 审核状态；审核通过后才会公开展示。
+  </p>
+  <div class="mt-6 max-w-3xl">
+    <ShowcaseSubmitForm client:load />
+  </div>
+</BaseLayout>
+

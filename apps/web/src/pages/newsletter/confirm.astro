@@ -1,0 +1,29 @@
+---
+export const prerender = false;
+
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { POCKETBASE_URL } from "@/lib/constants/config";
+
+const token = Astro.url.searchParams.get("token") || "";
+let status = "missing";
+
+if (token) {
+  const res = await fetch(`${POCKETBASE_URL}/api/newsletter/confirm?token=${encodeURIComponent(token)}`);
+  status = res.ok ? "confirmed" : "failed";
+}
+---
+
+<BaseLayout title="确认订阅 - PocketBase.cn" description="确认订阅 PocketBase 版本更新通知。">
+  <h1 class="text-2xl font-semibold tracking-tight">确认订阅</h1>
+  {status === "confirmed" ? (
+    <p class="mt-3 text-neutral-700 dark:text-neutral-300">订阅已确认。感谢支持！</p>
+  ) : status === "failed" ? (
+    <p class="mt-3 text-neutral-700 dark:text-neutral-300">确认失败，链接可能已失效。</p>
+  ) : (
+    <p class="mt-3 text-neutral-700 dark:text-neutral-300">缺少 token 参数。</p>
+  )}
+  <div class="mt-6">
+    <a class="text-brand-700 hover:underline dark:text-brand-300" href="/downloads">返回下载页</a>
+  </div>
+</BaseLayout>
+

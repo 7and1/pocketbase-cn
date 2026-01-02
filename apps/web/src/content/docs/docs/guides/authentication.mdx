@@ -1,0 +1,651 @@
+---
+title: 认证与授权
+description: Auth Collection 配置、OAuth 登录、邮箱验证、令牌管理与安全最佳实践
+---
+
+PocketBase 提供完整的用户认证和授权系统，支持邮箱密码登录、OAuth 第三方登录、邮箱验证等功能。
+
+## Auth Collection
+
+Auth Collection 是专门用于用户认证的集合类型，相比普通集合增加了认证相关功能。
+
+### 创建 Auth Collection
+
+1. 在 Admin UI 中点击 "New collection"
+2. 选择 "Auth" 类型
+3. 配置认证规则
+4. 添加自定义字段（可选）
+
+### 内置字段
+
+| 字段              | 类型     | 说明                     |
+| ----------------- | -------- | ------------------------ |
+| `username`        | text     | 用户名（可选，用于登录） |
+| `email`           | email    | 邮箱（可选，用于登录）   |
+| `emailVisibility` | bool     | 邮箱对其他用户的可见性   |
+| `verified`        | bool     | 邮箱验证状态             |
+| `password`        | password | 密码（自动加密存储）     |
+| `passwordConfirm` | password | 确认密码（仅创建时）     |
+| `avatar`          | file     | 头像文件                 |
+
+### 自定义字段示例
+
+```javascript
+// 用户集合结构
+{
+  "name": "users",
+  "type": "auth",
+  "fields": [
+    // 内置字段...
+    { "name": "name", "type": "text" },
+    { "name": "role", "type": "select", "options": {
+      "values": ["user", "author", "admin"],
+      "default": "user"
+    }},
+    { "name": "bio", "type": "text" },
+    { "name": "website", "type": "url" },
+    { "name": "githubId", "type": "text" },
+    { "name": "settings", "type": "json" }
+  ]
+}
+```
+
+## 用户注册与登录
+
+### 邮箱密码注册
+
+```javascript
+import PocketBase from "pocketbase";
+const pb = new PocketBase("http://127.0.0.1:8090");
+
+// 注册新用户
+const userData = {
+  email: "user@example.com",
+  password: "secure_password_123",
+  passwordConfirm: "secure_password_123",
+  name: "John Doe",
+  role: "user",
+};
+
+const record = await pb.collection("users").create(userData);
+console.log("Registered:", record);
+```
+
+### 用户名密码注册
+
+```javascript
+const userData = {
+  username: "johndoe",
+  password: "secure_password_123",
+  passwordConfirm: "secure_password_123",
+  emailVisibility: false, // 邮箱对其他用户不可见
+};
+
+const record = await pb.collection("users").create(userData);
+```
+
+### 用户登录
+
+```javascript
+// 使用邮箱登录
+const authData = await pb
+  .collection("users")
+  .authWithPassword("user@example.com", "secure_password_123");
+
+console.log("Token:", authData.token);
+console.log("User:", authData.record);
+
+// 使用用户名登录（如果配置了 username 字段）
+const authData = await pb
+  .collection("users")
+  .authWithPassword("johndoe", "secure_password_123");
+```
+
+### 登录响应结构
+
+```typescript
+{
+  token: string;           // JWT token
+  record: {
+    id: string;
+    collectionId: string;
+    collectionName: string;
+    username?: string;
+    email: string;
+    emailVisibility: boolean;
+    verified: boolean;
+    // ... 自定义字段
+  };
+}
+```
+
+## 令牌管理
+
+### 自动存储 Token
+
+SDK 会自动将 token 存储到 localStorage，后续请求自动携带：
+
+```javascript
+// 登录后 token 自动存储
+await pb.collection("users").authWithPassword(email, password);
+
+// 后续请求自动携带 token
+const posts = await pb.collection("posts").getList();
+```
+
+### 手动管理 Token
+
+```javascript
+// 获取当前 token
+const token = pb.authStore.token;
+
+// 手动设置 token
+pb.authStore.token = "your_token_here";
+
+// 清除 token（登出）
+pb.authStore.clear();
+
+// 保存整个认证数据
+pb.authStore.save(authData.token, authData.record);
+```
+
+### 检查登录状态
+
+```javascript
+// 检查是否已登录
+if (pb.authStore.isValid) {
+  console.log("Logged in as:", pb.authStore.model?.email);
+}
+
+// 获取当前用户
+const currentUser = pb.authStore.model;
+```
+
+### 用户登出
+
+```javascript
+// 清除本地 token
+pb.authStore.clear();
+
+// 或使用 SDK 方法
+pb.collection("users").authRefresh(); // 刷新 token
+pb.authStore.clear(); // 登出
+```
+
+## OAuth 第三方登录
+
+PocketBase 内置支持多种 OAuth 提供商：GitHub、Google、Facebook、Apple、Microsoft、GitLab、Spotify、Twitter、VK、Yandex、OIDC。
+
+### 配置 OAuth
+
+1. 在 OAuth 提供商处创建应用，获取 Client ID 和 Secret
+2. 在 PocketBase Admin UI 的 Settings 中配置 OAuth
+
+```
+Settings > Auth providers > GitHub
+- Client ID: your_github_client_id
+- Client Secret: your_github_client_secret
+- Redirect URL: http://127.0.0.1:8090/api/oauth2-redirect
+```
+
+### GitHub 登录
+
+```javascript
+import PocketBase from "pocketbase";
+const pb = new PocketBase("http://127.0.0.1:8090");
+
+// 方式 1: 使用 OAuth2 弹窗
+try {
+  const authData = await pb.collection("users").authWithOAuth2({
+    provider: "github",
+  });
+
+  console.log("Logged in with GitHub:", authData);
+} catch (err) {
+  console.error("OAuth failed:", err);
+}
+
+// 方式 2: 使用自定义回调
+try {
+  const authData = await pb.collection("users").authWithOAuth2({
+    provider: "github",
+    urlCallback: (url) => {
+      // 自定义处理 OAuth URL
+      window.open(url, "github_oauth", "width=600,height=600");
+    },
+  });
+} catch (err) {
+  console.error("OAuth failed:", err);
+}
+
+// 方式 3: 关联现有用户
+const authData = await pb.collection("users").authWithOAuth2({
+  provider: "github",
+  createData: {
+    email: "user@example.com",
+    // 其他字段
+  },
+});
+```
+
+### Google 登录
+
+```javascript
+const authData = await pb.collection("users").authWithOAuth2({
+  provider: "google",
+  // 可选：传递额外数据
+  createData: {
+    name: "Custom Name",
+    role: "user",
+  },
+});
+```
+
+### 存储 OAuth 数据
+
+```javascript
+// OAuth 响应包含 provider 信息
+const authData = await pb.collection("users").authWithOAuth2({
+  provider: "github",
+});
+
+// 可以在 hooks 中保存 OAuth ID
+// Go hooks 示例:
+// record.Set("githubId", oauthUser.ID)
+```
+
+## 邮箱验证
+
+### 启用邮箱验证
+
+1. 在 Admin UI 中配置 SMTP 设置
+2. Auth Collection 规则中要求验证：
+
+```
+Settings > Mail settings
+- SMTP server: smtp.example.com
+- SMTP port: 587
+- SMTP username: your_email@example.com
+- SMTP password: your_password
+- From email: noreply@example.com
+- From name: Your App
+```
+
+### 验证流程
+
+```javascript
+// 1. 注册用户
+const record = await pb.collection("users").create({
+  email: "user@example.com",
+  password: "password123",
+  passwordConfirm: "password123",
+  verified: false, // 默认未验证
+});
+
+// 2. 发送验证邮件（需要在 hooks 中实现）
+// 服务器端会自动发送验证链接
+
+// 3. 用户点击邮件中的链接验证
+
+// 4. 请求验证邮件（如果用户未收到）
+await pb.collection("users").requestVerification("user@example.com");
+```
+
+### 验证状态检查
+
+```javascript
+// 获取当前用户
+const user = pb.authStore.model;
+
+if (user && !user.verified) {
+  console.log("Please verify your email");
+  // 显示验证提示
+  showVerificationNotice();
+}
+```
+
+### 规则中验证检查
+
+```
+# 只允许已验证用户创建文章
+create = @request.auth.verified = true
+
+# 只允许已验证用户评论
+create = @request.auth.verified = true
+```
+
+## 密码重置
+
+### 请求重置
+
+```javascript
+// 发送重置邮件
+await pb.collection("users").requestPasswordReset("user@example.com");
+```
+
+### 确认重置
+
+```javascript
+// 用户从邮件链接获取 token
+// 然后设置新密码
+await pb
+  .collection("users")
+  .confirmPasswordReset(
+    "reset_token_from_email",
+    "new_password",
+    "new_password",
+  );
+```
+
+## 客户端集成示例
+
+### Vue 3 登录组件
+
+```vue
+<script setup>
+import { ref } from "vue";
+import PocketBase from "pocketbase";
+
+const pb = new PocketBase("http://127.0.0.1:8090");
+
+const email = ref("");
+const password = ref("");
+const loading = ref(false);
+const error = ref("");
+
+async function login() {
+  loading.value = true;
+  error.value = "";
+
+  try {
+    const authData = await pb
+      .collection("users")
+      .authWithPassword(email.value, password.value);
+    console.log("Logged in:", authData.record);
+    // 跳转到首页
+    router.push("/");
+  } catch (err) {
+    error.value = err.message || "Login failed";
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function register() {
+  loading.value = true;
+  error.value = "";
+
+  try {
+    await pb.collection("users").create({
+      email: email.value,
+      password: password.value,
+      passwordConfirm: password.value,
+    });
+    // 注册成功后自动登录
+    await login();
+  } catch (err) {
+    error.value = err.message || "Registration failed";
+  } finally {
+    loading.value = false;
+  }
+}
+
+function logout() {
+  pb.authStore.clear();
+  router.push("/login");
+}
+
+// 检查登录状态
+const isAuthenticated = pb.authStore.isValid;
+const currentUser = pb.authStore.model;
+</script>
+
+<template>
+  <div>
+    <form @submit.prevent="login">
+      <input v-model="email" type="email" placeholder="Email" />
+      <input v-model="password" type="password" placeholder="Password" />
+      <button type="submit" :disabled="loading">
+        {{ loading ? "Loading..." : "Login" }}
+      </button>
+    </form>
+    <p v-if="error">{{ error }}</p>
+  </div>
+</template>
+```
+
+### React 登录组件
+
+```jsx
+import { useState, useEffect } from "react";
+import PocketBase from "pocketbase";
+
+const pb = new PocketBase("http://127.0.0.1:8090");
+
+function LoginForm() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleLogin(e) {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+
+    try {
+      const authData = await pb
+        .collection("users")
+        .authWithPassword(email, password);
+      console.log("Logged in:", authData.record);
+    } catch (err) {
+      setError(err.message || "Login failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleLogin}>
+      <input
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="Email"
+      />
+      <input
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        placeholder="Password"
+      />
+      <button type="submit" disabled={loading}>
+        {loading ? "Loading..." : "Login"}
+      </button>
+      {error && <p>{error}</p>}
+    </form>
+  );
+}
+
+// 认证状态 Hook
+function useAuth() {
+  const [user, setUser] = useState(pb.authStore.model);
+
+  useEffect(() => {
+    const unsubscribe = pb.authStore.onChange(() => {
+      setUser(pb.authStore.model);
+    });
+    return unsubscribe;
+  }, []);
+
+  return {
+    user,
+    isAuthenticated: pb.authStore.isValid,
+    login: (email, password) =>
+      pb.collection("users").authWithPassword(email, password),
+    logout: () => pb.authStore.clear(),
+  };
+}
+```
+
+## UniApp 集成
+
+```javascript
+// utils/pocketbase.js
+import PocketBase from "pocketbase";
+
+export const pb = new PocketBase("http://your-server.com:8090");
+
+// 存储 token 到 uni.setStorageSync
+pb.authStore.onChange((token, model) => {
+  uni.setStorageSync("pb_auth", { token, model });
+});
+
+// 恢复登录状态
+const stored = uni.getStorageSync("pb_auth");
+if (stored) {
+  pb.authStore.save(stored.token, stored.model);
+}
+```
+
+## 安全最佳实践
+
+### 1. 密码要求
+
+在 Admin UI 中设置密码最小长度，或在 hooks 中验证：
+
+```javascript
+// hooks/validators.js
+onRecordCreateRequest((e) => {
+  if (e.record.collection().name === "users") {
+    const password = e.record.password();
+    if (password && password.length < 8) {
+      throw new BadRequestError("Password must be at least 8 characters");
+    }
+  }
+});
+```
+
+### 2. 限流登录
+
+在服务器端实现限流，防止暴力破解：
+
+```javascript
+// hooks/rate-limit.js
+const loginAttempts = new Map();
+
+onRecordAuthRequest((e) => {
+  const key = e.http.Request().RemoteAddr;
+  const attempts = loginAttempts.get(key) || 0;
+
+  if (attempts >= 5) {
+    throw new TooManyRequestsError("Too many login attempts");
+  }
+
+  loginAttempts.set(key, attempts + 1);
+
+  // 1 小时后重置
+  setTimeout(() => loginAttempts.delete(key), 3600000);
+});
+```
+
+### 3. HTTPS 生产部署
+
+生产环境务必使用 HTTPS：
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name your-domain.com;
+
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8090;
+    }
+}
+```
+
+### 4. CORS 配置
+
+限制允许的来源：
+
+```javascript
+// 启动时设置
+./pocketbase serve --http.cor.origins=https://your-frontend.com
+```
+
+### 5. Token 过期处理
+
+```javascript
+// 检测 token 过期并自动刷新
+pb.collection("users")
+  .authRefresh()
+  .then((authData) => {
+    console.log("Token refreshed");
+  })
+  .catch((err) => {
+    console.log("Token expired, please login again");
+    pb.authStore.clear();
+    router.push("/login");
+  });
+```
+
+## 常见问题
+
+### Q: 如何自定义 JWT token？
+
+使用 Go hooks 扩展：
+
+```go
+// hooks/main.go
+func OnRecordAuthRequest(e *core.RecordAuthRequestEvent) error {
+    // 添加自定义 claims
+    token, err := e.Record.NewStaticAuthToken()
+    // ...
+}
+```
+
+### Q: 如何实现多因素认证？
+
+```javascript
+// 添加 TOTP 字段
+{
+  "name": "totpSecret",
+  "type": "text",
+  "hidden": true
+}
+
+{
+  "name": "totpEnabled",
+  "type": "bool",
+  "default": false
+}
+
+// 在 hooks 中验证
+```
+
+### Q: 如何实现社交账号关联？
+
+```javascript
+// 用户登录后关联更多账号
+await pb.collection("users").authWithOAuth2({
+  provider: "google",
+  // 关联到当前用户
+  linkExisting: true,
+});
+```
+
+### Q: Token 过期如何处理？
+
+```javascript
+// SDK 自动尝试刷新 token
+pb.collection("users")
+  .authRefresh()
+  .catch((err) => {
+    // Token 无效，跳转登录
+    pb.authStore.clear();
+    router.push("/login");
+  });
+```

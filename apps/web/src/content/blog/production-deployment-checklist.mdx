@@ -1,0 +1,1069 @@
+---
+title: "PocketBase 生产部署完整清单"
+description: "PocketBase 生产环境部署的完整检查清单，涵盖安全配置、性能优化、监控备份、容灾恢复等各个方面，确保你的应用稳定可靠地运行。"
+publishDate: 2024-11-28
+category: "运维部署"
+tags: ["生产部署", "DevOps", "安全", "监控", "备份"]
+author: "PocketBase.cn"
+featured: true
+---
+
+## 概述
+
+将 PocketBase 部署到生产环境需要仔细规划和执行。本文提供了一份全面的部署清单，帮助你确保应用在生产环境中安全、稳定、高效地运行。
+
+## 目录
+
+1. [部署前准备](#部署前准备)
+2. [安全配置](#安全配置)
+3. [性能优化](#性能优化)
+4. [监控与日志](#监控与日志)
+5. [备份策略](#备份策略)
+6. [灾难恢复](#灾难恢复)
+7. [持续部署](#持续部署)
+8. [运维检查表](#运维检查表)
+
+## 部署前准备
+
+### 服务器选型
+
+#### 最小配置（小型项目）
+
+```
+CPU: 1 核
+内存: 512MB - 1GB
+存储: 20GB SSD
+带宽: 1Mbps
+适用: < 1000 用户/日，数据量 < 100MB
+```
+
+#### 推荐配置（中型项目）
+
+```
+CPU: 2 核
+内存: 2GB - 4GB
+存储: 50GB SSD
+带宽: 5Mbps
+适用: < 10,000 用户/日，数据量 < 5GB
+```
+
+#### 高性能配置（大型项目）
+
+```
+CPU: 4 核+
+内存: 8GB+
+存储: 100GB+ SSD (NVMe)
+带宽: 10Mbps+
+适用: 高并发、大数据量场景
+```
+
+### 操作系统配置
+
+#### 1. 更新系统
+
+```bash
+# Ubuntu/Debian
+sudo apt update && sudo apt upgrade -y
+
+# CentOS/RHEL
+sudo yum update -y
+```
+
+#### 2. 创建专用用户
+
+```bash
+# 创建 pocketbase 用户
+sudo useradd -r -s /bin/false pocketbase
+
+# 创建数据目录
+sudo mkdir -p /opt/pocketbase
+sudo mkdir -p /var/lib/pocketbase
+
+# 设置权限
+sudo chown -R pocketbase:pocketbase /opt/pocketbase
+sudo chown -R pocketbase:pocketbase /var/lib/pocketbase
+```
+
+#### 3. 系统限制
+
+```bash
+# 编辑 limits.conf
+sudo nano /etc/security/limits.conf
+
+# 添加以下内容
+pocketbase soft nofile 65536
+pocketbase hard nofile 65536
+pocketbase soft nproc 4096
+pocketbase hard nproc 4096
+```
+
+## 安全配置
+
+### 1. 反向代理配置
+
+#### Nginx 配置
+
+```nginx
+server {
+    listen 80;
+    listen [::]:80;
+    server_name api.example.com;
+
+    # 强制 HTTPS
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name api.example.com;
+
+    # SSL 证书配置
+    ssl_certificate /etc/letsencrypt/live/api.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.example.com/privkey.pem;
+
+    # 现代 SSL 配置
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:10m;
+
+    # 安全头
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Content-Security-Policy "default-src 'self'" always;
+
+    # 请求大小限制
+    client_max_body_size 100M;
+
+    # 超时配置
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 60s;
+    proxy_read_timeout 60s;
+
+    location / {
+        proxy_pass http://127.0.0.1:8090;
+        proxy_http_version 1.1;
+
+        # WebSocket 支持
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # 标准代理头
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # 缓冲配置
+        proxy_buffering off;
+        proxy_request_buffering off;
+    }
+
+    # 健康检查端点（可选）
+    location /health {
+        access_log off;
+        return 200 "OK";
+        add_header Content-Type text/plain;
+    }
+}
+```
+
+#### Caddy 配置（自动 HTTPS）
+
+```caddyfile
+api.example.com {
+    reverse_proxy 127.0.0.1:8090
+
+    # 安全头
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Frame-Options "SAMEORIGIN"
+        X-Content-Type-Options "nosniff"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "no-referrer-when-downgrade"
+    }
+
+    # 请求大小限制
+    {
+        max_body_size 100MB
+    }
+
+    # 日志
+    log {
+        output file /var/log/caddy/pocketbase-access.log
+        format json
+    }
+}
+```
+
+### 2. 防火墙配置
+
+```bash
+# UFW (Ubuntu)
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow 22/tcp      # SSH
+sudo ufw allow 80/tcp      # HTTP
+sudo ufw allow 443/tcp     # HTTPS
+sudo ufw enable
+
+# firewalld (CentOS)
+sudo firewall-cmd --permanent --add-service=ssh
+sudo firewall-cmd --permanent --add-service=http
+sudo firewall-cmd --permanent --add-service=https
+sudo firewall-cmd --permanent --remove-port=8090/tcp  # 不直接暴露 PB 端口
+sudo firewall-cmd --reload
+```
+
+### 3. PocketBase 安全配置
+
+#### 创建 `pb_data` 目录结构
+
+```bash
+/var/lib/pocketbase/
+├── data.db              # 数据库文件
+├── data.db-shm          # WAL 共享内存
+├── data.db-wal          # WAL 日志
+├── logs/                # 日志目录
+├── backups/             # 备份目录
+└── uploads/             # 上传文件
+```
+
+#### 设置适当的文件权限
+
+```bash
+# 设置目录权限
+sudo chmod 750 /var/lib/pocketbase
+sudo chmod 750 /var/lib/pocketbase/logs
+sudo chmod 750 /var/lib/pocketbase/backups
+
+# 设置数据库文件权限（仅 owner 可读写）
+sudo chmod 600 /var/lib/pocketbase/data.db*
+
+# 设置上传目录权限
+sudo chmod 750 /var/lib/pocketbase/uploads
+```
+
+### 4. 环境变量配置
+
+```bash
+# /etc/default/pocketbase
+
+# PocketBase 配置
+PB_URL="https://api.example.com"
+PB_ADMIN_EMAIL="admin@example.com"
+PB_ADMIN_PASSWORD="your-secure-password"
+
+# 数据目录
+PB_DATA_DIR="/var/lib/pocketbase"
+
+# 日志级别
+PB_LOG_LEVEL="info"
+
+# HTTP 配置
+PB_SERVER_HOST="127.0.0.1"
+PB_SERVER_PORT="8090"
+
+# 加密密钥（用于敏感数据加密）
+PB_ENCRYPTION_KEY="your-32-character-encryption-key"
+```
+
+### 5. 初始安全设置
+
+```bash
+# 1. 启动 PocketBase
+./pocketbase serve --http 127.0.0.1:8090
+
+# 2. 访问 Admin UI 并完成初始设置
+open https://api.example.com/_/
+
+# 3. 完成后立即修改默认管理员密码
+
+# 4. 配置集合权限规则
+# - 不要在生产环境使用宽松的规则
+# - 为每个集合配置明确的 list/view/create/update/delete 规则
+# - 使用 API 密钥保护敏感操作
+```
+
+### 6. API 密钥配置
+
+```javascript
+// 在 PocketBase Hooks 中验证 API 密钥
+
+// pb_hooks/hooks.go
+package main
+
+import (
+    "github.com/pocketbase/pocketbase"
+    "github.com/pocketbase/pocketbase/core"
+    "net/http"
+)
+
+func ApiKeyGuard(e *core.ServeEvent, next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // 从请求头获取 API 密钥
+        apiKey := r.Header.Get("X-API-Key")
+
+        // 验证 API 密钥
+        if apiKey != os.Getenv("PB_API_KEY") {
+            http.Error(w, "Unauthorized", http.StatusUnauthorized)
+            return
+        }
+
+        next(w, r)
+    }
+}
+
+// 在 main.go 中注册
+func main() {
+    app := pocketbase.New()
+
+    app.OnBeforeServe().Add(func(e *core.ServeEvent) error {
+        e.Router.GET("/api/protected/*", ApiKeyGuard(e, func(w http.ResponseWriter, r *http.Request) {
+            // 受保护的端点
+        }))
+        return nil
+    })
+
+    app.Serve()
+}
+```
+
+## 性能优化
+
+### 1. SQLite 配置优化
+
+PocketBase 使用 SQLite，可以通过 PRAGMA 设置优化性能：
+
+#### PRAGMA 设置
+
+```sql
+-- 连接时执行
+PRAGMA journal_mode = WAL;           -- 使用 WAL 模式
+PRAGMA synchronous = NORMAL;         -- 平衡性能和安全性
+PRAGMA cache_size = -64000;          -- 64MB 缓存
+PRAGMA temp_store = MEMORY;          -- 临时数据存储在内存
+PRAGMA mmap_size = 30000000000;      -- 启用内存映射
+PRAGMA page_size = 4096;             -- 页面大小匹配文件系统
+PRAGMA wal_autocheckpoint = 1000;    -- WAL 检查点频率
+```
+
+#### 在 PocketBase 中应用
+
+```go
+// migrations/001_optimize_sqlite.go
+func (m *Migration001) Up(app *pocketbase.PocketBase) error {
+    _, err := app.DB().Execute(`
+        PRAGMA journal_mode = WAL;
+        PRAGMA synchronous = NORMAL;
+        PRAGMA cache_size = -64000;
+        PRAGMA temp_store = MEMORY;
+    `)
+    return err
+}
+```
+
+### 2. 连接池配置
+
+```go
+// 在启动脚本中配置
+app.DB().DB.SetMaxOpenConns(25)       // 最大打开连接数
+app.DB().DB.SetMaxIdleConns(25)       // 最大空闲连接数
+app.DB().DB.SetConnMaxLifetime(5 * time.Minute)  // 连接最大生命周期
+```
+
+### 3. 索引优化
+
+```sql
+-- 为常用查询字段创建索引
+CREATE INDEX idx_posts_status ON posts(status);
+CREATE INDEX idx_posts_created ON posts(created DESC);
+CREATE INDEX idx_posts_author ON posts(author);
+CREATE INDEX idx_posts_category_status ON posts(category, status);
+
+-- 复合索引用于排序和筛选
+CREATE INDEX idx_posts_status_created ON posts(status, created DESC);
+```
+
+### 4. 静态文件 CDN
+
+对于上传的静态文件，使用对象存储 + CDN：
+
+```javascript
+// 配置阿里云 OSS
+const OSS = require("ali-oss");
+
+const client = new OSS({
+  region: "oss-cn-hangzhou",
+  accessKeyId: process.env.OSS_ACCESS_KEY_ID,
+  accessKeySecret: process.env.OSS_ACCESS_KEY_SECRET,
+  bucket: "your-bucket",
+});
+
+// 上传后同步到 OSS
+pb.collections.onAfterCreate((e) => {
+  if (e.record.file) {
+    const file = pb.files.getURL(e.record, e.record.file);
+    // 同步到 OSS
+  }
+});
+```
+
+### 5. 缓存策略
+
+```javascript
+// 使用 Redis 缓存热数据
+import Redis from "ioredis";
+
+const redis = new Redis({
+  host: "localhost",
+  port: 6379,
+});
+
+// 缓存热门文章列表
+async function getPopularPosts() {
+  const cached = await redis.get("posts:popular");
+  if (cached) {
+    return JSON.parse(cached);
+  }
+
+  const posts = await pb.collection("posts").getList(1, 20, {
+    sort: "-views",
+    filter: 'status = "published"',
+  });
+
+  await redis.setex("posts:popular", 300, JSON.stringify(posts));
+  return posts;
+}
+```
+
+### 6. 资源限制配置
+
+```bash
+# /etc/systemd/system/pocketbase.service
+
+[Service]
+# 内存限制
+MemoryLimit=1G
+
+# CPU 限制
+CPUQuota=100%
+
+# 文件描述符限制
+LimitNOFILE=65536
+
+# 进程数限制
+LimitNPROC=4096
+```
+
+## 监控与日志
+
+### 1. 日志配置
+
+```bash
+# 配置日志轮转
+sudo nano /etc/logrotate.d/pocketbase
+
+/var/lib/pocketbase/logs/*.log {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    create 0640 pocketbase pocketbase
+    sharedscripts
+    postrotate
+        systemctl reload pocketbase > /dev/null 2>&1 || true
+    endscript
+}
+```
+
+### 2. 日志管理方案
+
+#### 使用 Loki + Grafana
+
+```yaml
+# docker-compose.yml
+version: "3.8"
+
+services:
+  loki:
+    image: grafana/loki:latest
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki-config.yml:/etc/loki/local-config.yaml
+
+  promtail:
+    image: grafana/promtail:latest
+    volumes:
+      - /var/lib/pocketbase/logs:/var/log/pocketbase:ro
+      - ./promtail-config.yml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+```
+
+### 3. 指标监控
+
+#### PocketBase 内置指标
+
+```go
+// 添加 Prometheus 指标端点
+import (
+    "github.com/prometheus/client_golang/prometheus"
+    "github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+var (
+    httpRequestsTotal = prometheus.NewCounterVec(
+        prometheus.CounterOpts{
+            Name: "http_requests_total",
+            Help: "Total number of HTTP requests",
+        },
+        []string{"method", "endpoint"},
+    )
+
+    httpRequestDuration = prometheus.NewHistogramVec(
+        prometheus.HistogramOpts{
+            Name: "http_request_duration_seconds",
+            Help: "HTTP request duration in seconds",
+        },
+        []string{"method", "endpoint"},
+    )
+)
+
+func init() {
+    prometheus.MustRegister(httpRequestsTotal)
+    prometheus.MustRegister(httpRequestDuration)
+}
+```
+
+### 4. 健康检查
+
+```go
+// 自定义健康检查端点
+app.OnBeforeServe().Add(func(e *core.ServeEvent) error {
+    e.Router.GET("/api/health", func(w http.ResponseWriter, r *http.Request) {
+        // 检查数据库连接
+        if err := app.DB().Ping(); err != nil {
+            w.WriteHeader(http.StatusServiceUnavailable)
+            w.Write([]byte(`{"status":"unhealthy","reason":"database"}`))
+            return
+        }
+
+        // 检查磁盘空间
+        // ... 添加更多检查
+
+        w.WriteHeader(http.StatusOK)
+        w.Write([]byte(`{"status":"healthy"}`))
+    })
+    return nil
+})
+```
+
+### 5. 告警配置
+
+```yaml
+# alerting rules for Prometheus
+groups:
+  - name: pocketbase
+    rules:
+      - alert: PocketBaseDown
+        expr: up{job="pocketbase"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PocketBase is down"
+
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes{job="pocketbase"} > 1000000000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PocketBase high memory usage"
+
+      - alert: DiskSpaceLow
+        expr: node_filesystem_avail_bytes{mountpoint="/var/lib/pocketbase"} < 1000000000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low disk space on PocketBase data directory"
+```
+
+## 备份策略
+
+### 1. 数据库备份
+
+#### 自动备份脚本
+
+```bash
+#!/bin/bash
+# /usr/local/bin/backup-pocketbase.sh
+
+BACKUP_DIR="/var/backups/pocketbase"
+DATA_DIR="/var/lib/pocketbase"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+RETENTION_DAYS=30
+
+# 创建备份目录
+mkdir -p "$BACKUP_DIR"
+
+# 停止服务（确保数据一致性）
+systemctl stop pocketbase
+
+# 备份数据库
+cp "$DATA_DIR/data.db" "$BACKUP_DIR/data_$TIMESTAMP.db"
+cp "$DATA_DIR/data.db-wal" "$BACKUP_DIR/data_$TIMESTAMP.db-wal" 2>/dev/null || true
+cp "$DATA_DIR/data.db-shm" "$BACKUP_DIR/data_$TIMESTAMP.db-shm" 2>/dev/null || true
+
+# 启动服务
+systemctl start pocketbase
+
+# 压缩备份
+gzip "$BACKUP_DIR/data_$TIMESTAMP.db"
+
+# 删除旧备份
+find "$BACKUP_DIR" -name "data_*.db.gz" -mtime +$RETENTION_DAYS -delete
+
+# 同步到远程存储（可选）
+# aws s3 sync "$BACKUP_DIR" s3://your-bucket/pocketbase-backups/
+
+echo "Backup completed: data_$TIMESTAMP.db.gz"
+```
+
+#### 设置定时任务
+
+```bash
+# 添加到 crontab
+crontab -e
+
+# 每天凌晨 2 点执行备份
+0 2 * * * /usr/local/bin/backup-pocketbase.sh >> /var/log/pocketbase-backup.log 2>&1
+
+# 每小时执行增量备份（可选）
+0 * * * * /usr/local/bin/backup-pocketbase-incremental.sh
+```
+
+### 2. 文件备份
+
+```bash
+#!/bin/bash
+# 备份上传文件
+
+BACKUP_DIR="/var/backups/pocketbase/files"
+UPLOAD_DIR="/var/lib/pocketbase/uploads"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+
+# 使用 rsync 增量备份
+rsync -av --delete "$UPLOAD_DIR/" "$BACKUP_DIR/current/"
+
+# 每天创建快照
+cp -al "$BACKUP_DIR/current" "$BACKUP_DIR/snapshot_$TIMESTAMP"
+
+# 清理旧快照（保留 7 天）
+find "$BACKUP_DIR" -maxdepth 1 -name "snapshot_*" -mtime +7 -exec rm -rf {} \;
+```
+
+### 3. 远程备份
+
+#### 上传到阿里云 OSS
+
+```bash
+#!/bin/bash
+# 安装 ossutil
+# wget http://gosspublic.alicdn.com/ossutil/1.7.7/ossutil64
+# chmod +x ossutil64
+# ./ossutil64 config
+
+OSS_BUCKET="your-bucket"
+OSS_PREFIX="pocketbase-backups"
+LOCAL_BACKUP="/var/backups/pocketbase"
+
+# 同步备份到 OSS
+/usr/local/bin/ossutil64 sync "$LOCAL_BACKUP/" "oss://$OSS_BUCKET/$OSS_PREFIX/" --update
+
+# 设置生命周期规则（30 天后删除）
+/usr/local/bin/ossutil64 lifecycle --oss-url oss://$OSS_BUCKET lifecycle.xml
+```
+
+#### 上传到 AWS S3
+
+```bash
+#!/bin/bash
+# 使用 AWS CLI
+aws s3 sync /var/backups/pocketbase/ s3://your-bucket/pocketbase-backups/ \
+  --storage-class STANDARD_IA \
+  --delete
+```
+
+### 4. 备份加密
+
+```bash
+#!/bin/bash
+# 加密备份文件
+
+ENCRYPTION_KEY="/etc/pocketbase/backup-key.txt"
+BACKUP_FILE="$1"
+ENCRYPTED_FILE="${BACKUP_FILE}.gpg"
+
+# 使用 GPG 加密
+gpg --batch --yes --cipher-algo AES256 \
+    --compress-algo 1 \
+    --symmetric \
+    --passphrase-file "$ENCRYPTION_KEY" \
+    --output "$ENCRYPTED_FILE" \
+    "$BACKUP_FILE"
+
+# 删除未加密文件
+shred -u "$BACKUP_FILE"
+```
+
+### 5. 备份验证
+
+```bash
+#!/bin/bash
+# 定期验证备份完整性
+
+BACKUP_FILE="/var/backups/pocketbase/data_latest.db.gz"
+
+# 1. 检查文件存在
+if [ ! -f "$BACKUP_FILE" ]; then
+    echo "ERROR: Backup file not found"
+    exit 1
+fi
+
+# 2. 检查文件完整性
+if ! gzip -t "$BACKUP_FILE"; then
+    echo "ERROR: Backup file is corrupted"
+    exit 1
+fi
+
+# 3. 测试恢复到临时位置
+TEMP_DB="/tmp/test_restore.db"
+gunzip -c "$BACKUP_FILE" > "$TEMP_DB"
+
+if ! sqlite3 "$TEMP_DB" "PRAGMA integrity_check;"; then
+    echo "ERROR: Database integrity check failed"
+    rm -f "$TEMP_DB"
+    exit 1
+fi
+
+rm -f "$TEMP_DB"
+echo "Backup validation passed"
+```
+
+## 灾难恢复
+
+### 1. 数据库恢复步骤
+
+```bash
+#!/bin/bash
+# restore-pocketbase.sh
+
+BACKUP_FILE="$1"
+DATA_DIR="/var/lib/pocketbase"
+
+# 1. 停止服务
+systemctl stop pocketbase
+
+# 2. 备份当前数据（以防万一）
+cp "$DATA_DIR/data.db" "$DATA_DIR/data.db.before_restore"
+
+# 3. 解压并恢复
+gunzip -c "$BACKUP_FILE" > "$DATA_DIR/data.db"
+
+# 4. 设置权限
+chown pocketbase:pocketbase "$DATA_DIR/data.db"
+chmod 600 "$DATA_DIR/data.db"
+
+# 5. 启动服务
+systemctl start pocketbase
+
+# 6. 验证
+sleep 5
+systemctl status pocketbase
+```
+
+### 2. 灾难恢复演练
+
+```markdown
+# 灾难恢复检查表
+
+## 每月执行一次
+
+- [ ] 记录当前数据库大小
+- [ ] 在测试环境执行完整恢复
+- [ ] 验证恢复的数据完整性
+- [ ] 记录恢复所需时间
+- [ ] 更新恢复文档
+
+## 每季度执行一次
+
+- [ ] 模拟完全服务器故障
+- [ ] 从备份在新服务器上恢复
+- [ ] 验证所有功能正常
+- [ ] 测试 RTO（恢复时间目标）
+- [ ] 测试 RPO（恢复点目标）
+```
+
+### 3. 高可用架构
+
+```
+                    ┌─────────────┐
+                    │   DNS / LB  │
+                    └──────┬──────┘
+                           │
+            ┌──────────────┼──────────────┐
+            │              │              │
+      ┌─────▼─────┐ ┌─────▼─────┐ ┌─────▼─────┐
+      │  Server 1 │ │  Server 2 │ │  Server 3 │
+      │ (Primary) │ │ (Standby) │ │ (Standby) │
+      └───────────┘ └───────────┘ └───────────┘
+            │              │              │
+            └──────────────┼──────────────┘
+                           │
+                    ┌──────▼──────┐
+                    │   Shared    │
+                    │   Storage   │
+                    │   (NFS/Gluster) │
+                    └─────────────┘
+```
+
+#### 主从复制实现
+
+```go
+// 使用 SQLite 扩展或自定义同步逻辑
+// 由于 SQLite 不原生支持主从复制，可以：
+
+// 方案 1: 使用 Litestream (推荐)
+// https://litestream.io/
+
+// 方案 2: 自定义同步
+func syncReplica() {
+    // 定期将 WAL 文件同步到从节点
+    // 从节点重放 WAL 更新
+}
+```
+
+### 4. 故障转移方案
+
+```bash
+#!/bin/bash
+# 自动故障转移脚本
+
+PRIMARY_SERVER="192.168.1.10"
+STANDBY_SERVER="192.168.1.11"
+
+# 检查主服务器状态
+if ! curl -f -s "http://$PRIMARY_SERVER:8090/api/health" > /dev/null; then
+    echo "Primary server is down, initiating failover..."
+
+    # 1. 确认主服务器真正宕机
+    sleep 10
+    if ! curl -f -s "http://$PRIMARY_SERVER:8090/api/health" > /dev/null; then
+        # 2. 在备用服务器上启动 PocketBase
+        ssh "$STANDBY_SERVER" "systemctl start pocketbase-standby"
+
+        # 3. 更新 DNS 指向备用服务器
+        # 通过 API 调用更新 DNS 记录
+
+        # 4. 发送告警通知
+        send_alert "Failover completed: $STANDBY_SERVER is now primary"
+    fi
+fi
+```
+
+## 持续部署
+
+### 1. Docker 部署
+
+```dockerfile
+# Dockerfile
+FROM alpine:latest
+
+# 安装依赖
+RUN apk add --no-cache ca-certificates
+
+# 复制 PocketBase 二进制文件
+COPY pocketbase /usr/local/bin/
+
+# 创建数据目录
+RUN mkdir -p /pb_data && \
+    chown -R nobody:nobody /pb_data
+
+# 切换用户
+USER nobody
+
+# 暴露端口
+EXPOSE 8090
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8090/api/health || exit 1
+
+# 启动 PocketBase
+CMD ["pocketbase", "serve", "--http", "0.0.0.0:8090"]
+```
+
+```yaml
+# docker-compose.yml
+version: "3.8"
+
+services:
+  pocketbase:
+    build: .
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./pb_data:/pb_data
+    environment:
+      - PB_ENCRYPTION_KEY=${PB_ENCRYPTION_KEY}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        ["CMD", "wget", "-q", "--spider", "http://localhost:8090/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+```
+
+### 2. CI/CD 流程
+
+```yaml
+# .github/workflows/deploy.yml
+name: Deploy PocketBase
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd /opt/pocketbase
+            git pull origin main
+            systemctl reload pocketbase
+```
+
+### 3. 蓝绿部署
+
+```bash
+#!/bin/bash
+# 蓝绿部署脚本
+
+GREEN_PORT=8090
+BLUE_PORT=8091
+
+# 1. 部署新版本到蓝环境
+./pocketbase serve --http 127.0.0.1:$BLUE_PORT &
+PB_PID=$!
+
+# 2. 等待蓝环境就绪
+sleep 5
+
+# 3. 健康检查
+if curl -f "http://localhost:$BLUE_PORT/api/health"; then
+    # 4. 切换 Nginx 配置指向蓝环境
+    sed -i "s/port $GREEN_PORT/port $BLUE_PORT/" /etc/nginx/conf.d/pocketbase.conf
+    nginx -s reload
+
+    # 5. 停止绿环境
+    pkill -f "pocketbase.*:$GREEN_PORT"
+
+    echo "Blue-green deployment successful"
+else
+    # 回滚
+    kill $PB_PID
+    echo "Deployment failed, rolling back"
+    exit 1
+fi
+```
+
+## 运维检查表
+
+### 日常检查（每日）
+
+```markdown
+- [ ] 检查服务状态: systemctl status pocketbase
+- [ ] 检查磁盘空间: df -h /var/lib/pocketbase
+- [ ] 检查错误日志: tail -n 100 /var/lib/pocketbase/logs/errors.log
+- [ ] 检查备份任务: ls -lh /var/backups/pocketbase/
+- [ ] 检查 API 响应时间
+- [ ] 检查活跃连接数
+```
+
+### 周期检查（每周）
+
+```markdown
+- [ ] 审查安全日志
+- [ ] 检查用户增长趋势
+- [ ] 分析慢查询
+- [ ] 审查 API 使用统计
+- [ ] 更新依赖和系统补丁
+- [ ] 测试备份恢复
+```
+
+### 月度检查（每月）
+
+```markdown
+- [ ] 性能基准测试
+- [ ] 容量规划评估
+- [ ] 安全审计
+- [ ] 权限审查
+- [ ] 文档更新
+- [ ] 灾难恢复演练
+```
+
+### 季度检查（每季度）
+
+```markdown
+- [ ] 架构评估
+- [ ] 成本优化审查
+- [ ] 高可用测试
+- [ ] 备份策略评估
+- [ ] 监控告警阈值调整
+```
+
+## 总结
+
+生产环境部署是一个系统性工程，需要从安全、性能、监控、备份等多个维度进行全面考虑。本清单涵盖了 PocketBase 部署的主要方面，建议根据实际项目情况进行调整和补充。
+
+关键要点：
+
+1. **安全第一** - 始终使用 HTTPS、限制直接访问、设置适当的权限
+2. **定期备份** - 自动化备份并定期验证可恢复性
+3. **持续监控** - 建立完善的监控告警体系
+4. **文档完善** - 记录所有配置和操作流程
+5. **定期演练** - 测试灾难恢复流程
+
+## 参考资源
+
+- [PocketBase 官方文档](/docs)
+- [生产环境部署指南](/docs/guides/going-to-production)
+- [Docker 部署最佳实践](/docs/deploy/docker)
+- [PocketBase vs Firebase 对比](/blog/pocketbase-vs-firebase)
+- [PocketBase vs Supabase 对比](/blog/pocketbase-vs-supabase)

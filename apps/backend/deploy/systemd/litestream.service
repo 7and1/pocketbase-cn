@@ -1,0 +1,16 @@
+[Unit]
+Description=Litestream Replication (PocketBase.cn)
+After=network.target
+
+[Service]
+Type=simple
+User=pocketbase
+Group=pocketbase
+EnvironmentFile=/opt/pocketbase/.env
+ExecStart=/usr/bin/litestream replicate -config /opt/pocketbase/litestream.yml
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+
