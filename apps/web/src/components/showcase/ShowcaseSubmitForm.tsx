@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "@nanostores/react";
 import { z } from "zod";
 import { pb } from "@/lib/pocketbase/client";
@@ -10,15 +10,21 @@ import {
 } from "@/lib/stores/auth";
 import { SHOWCASE_CATEGORIES } from "@/lib/constants/categories";
 import { slugify } from "@/lib/utils/slug";
+import { showcaseSubmitSchema } from "@/lib/schemas";
+import {
+  clearDraft,
+  loadDraft,
+  saveDraft,
+  type DraftData,
+} from "@/lib/utils/draftStore";
+import {
+  createTouchTracker,
+  type FormErrors,
+} from "@/lib/utils/formValidation";
+import { MarkdownEditor } from "@/components/ui/MarkdownPreview";
 
-const schema = z.object({
-  title: z.string().min(3).max(100),
-  description: z.string().min(10).max(1000),
-  url: z.string().url(),
-  repository: z.string().url().optional().or(z.literal("")),
+const schema = showcaseSubmitSchema.extend({
   category: z.enum(SHOWCASE_CATEGORIES),
-  tags: z.string().optional().or(z.literal("")),
-  content: z.string().optional().or(z.literal("")),
 });
 
 export interface ShowcaseEditData {
@@ -56,6 +62,11 @@ export default function ShowcaseSubmitForm({
 
   const isEditMode = mode === "edit" && initialData;
 
+  // Draft management
+  const [showDraftBanner, setShowDraftBanner] = useState(false);
+  const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchTracker = useRef(createTouchTracker()).current;
+
   const [title, setTitle] = useState(initialData?.title || "");
   const [description, setDescription] = useState(
     initialData?.description || "",
@@ -75,10 +86,125 @@ export default function ShowcaseSubmitForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FormErrors>({});
 
   useEffect(() => {
     initAuth();
   }, []);
+
+  // Load draft on mount (only for create mode)
+  useEffect(() => {
+    if (mode === "create" && !initialData) {
+      const draft = loadDraft("showcase", "create");
+      if (draft && Object.keys(draft).length > 0) {
+        setShowDraftBanner(true);
+        if (draft.title) setTitle(String(draft.title));
+        if (draft.description) setDescription(String(draft.description));
+        if (draft.url) setUrl(String(draft.url));
+        if (draft.repository) setRepository(String(draft.repository));
+        if (draft.category)
+          setCategory(draft.category as (typeof SHOWCASE_CATEGORIES)[number]);
+        if (draft.tags) setTags(String(draft.tags));
+        if (draft.content) setContent(String(draft.content));
+      }
+    }
+  }, [mode]);
+
+  // Auto-save draft
+  const saveDraftDebounced = useCallback(() => {
+    if (mode === "edit") return; // Don't save drafts in edit mode
+    if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+    draftSaveTimer.current = setTimeout(() => {
+      const draftData: DraftData = {
+        title,
+        description,
+        url,
+        repository,
+        category,
+        tags,
+        content,
+      };
+      saveDraft("showcase", draftData, "create");
+    }, 1000);
+  }, [title, description, url, repository, category, tags, content, mode]);
+
+  useEffect(() => {
+    saveDraftDebounced();
+    return () => {
+      if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+    };
+  }, [saveDraftDebounced]);
+
+  // Restore draft from banner
+  const handleRestoreDraft = () => {
+    setShowDraftBanner(false);
+  };
+
+  // Clear draft
+  const handleClearDraft = () => {
+    clearDraft("showcase", "create");
+    setShowDraftBanner(false);
+    // Reset form
+    setTitle("");
+    setDescription("");
+    setUrl("");
+    setRepository("");
+    setCategory("saas");
+    setTags("");
+    setContent("");
+    touchTracker.reset();
+    setFieldErrors({});
+  };
+
+  // Validate field on blur
+  const handleFieldBlur = useCallback(
+    (fieldName: string) => {
+      touchTracker.touch(fieldName);
+      const data = {
+        title,
+        description,
+        url,
+        repository,
+        category,
+        tags,
+        content,
+      };
+      try {
+        schema.parse({
+          ...data,
+          [fieldName]: data[fieldName as keyof typeof data],
+        });
+        setFieldErrors((prev) => {
+          const next = { ...prev };
+          delete next[fieldName];
+          return next;
+        });
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          const issue = err.issues.find((i) => i.path.join(".") === fieldName);
+          if (issue) {
+            setFieldErrors((prev) => ({ ...prev, [fieldName]: issue.message }));
+          }
+        }
+      }
+    },
+    [
+      title,
+      description,
+      url,
+      repository,
+      category,
+      tags,
+      content,
+      touchTracker,
+    ],
+  );
+
+  const getFieldError = (fieldName: string) => {
+    return touchTracker.isTouched(fieldName)
+      ? fieldErrors[fieldName]
+      : undefined;
+  };
 
   const tagPreview = useMemo(() => parseTags(tags), [tags]);
 
@@ -156,34 +282,79 @@ export default function ShowcaseSubmitForm({
             form.set("slug", newSlug);
             await pb.collection("showcase").create(form);
             setOk("提交成功，已进入审核队列。");
+            // Clear draft on successful submission
+            clearDraft("showcase", "create");
             window.setTimeout(() => {
               window.location.href = "/dashboard";
             }, 600);
           }
-        } catch (err: any) {
-          if (err?.issues?.[0]?.message) setError(err.issues[0].message);
-          else setError(err?.message || "提交失败");
+        } catch (err: unknown) {
+          if (
+            err &&
+            typeof err === "object" &&
+            "issues" in err &&
+            Array.isArray(err.issues) &&
+            err.issues[0]?.message
+          ) {
+            setError(String(err.issues[0].message));
+          } else {
+            const message = err instanceof Error ? err.message : "提交失败";
+            setError(message);
+          }
         } finally {
           setSubmitting(false);
         }
       }}
     >
+      {/* Draft restoration banner */}
+      {showDraftBanner ? (
+        <div className="mb-4 flex items-center justify-between rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-950/30">
+          <span className="text-amber-800 dark:text-amber-300">
+            Found a saved draft. Would you like to restore it?
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleClearDraft}
+              className="rounded px-2 py-1 text-xs text-amber-700 hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-900/30"
+            >
+              Dismiss
+            </button>
+            <button
+              type="button"
+              onClick={handleRestoreDraft}
+              className="rounded bg-amber-600 px-2 py-1 text-xs text-white hover:bg-amber-700"
+            >
+              Restore Draft
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="grid gap-4 md:grid-cols-2">
         <label className="space-y-1">
           <div className="text-sm font-medium">标题</div>
           <input
-            className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950"
+            className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:border-brand-500 dark:bg-neutral-950 ${getFieldError("title") ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-neutral-200 bg-white dark:border-neutral-800"}`}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            onBlur={() => handleFieldBlur("title")}
             placeholder="例如：PocketBase + Astro 作品集"
           />
+          {getFieldError("title") && (
+            <p className="text-xs text-red-600">{getFieldError("title")}</p>
+          )}
         </label>
         <label className="space-y-1">
           <div className="text-sm font-medium">分类</div>
           <select
             className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950"
             value={category}
-            onChange={(e) => setCategory(e.target.value as any)}
+            onChange={(e) =>
+              setCategory(
+                e.target.value as (typeof SHOWCASE_CATEGORIES)[number],
+              )
+            }
           >
             {SHOWCASE_CATEGORIES.map((c) => (
               <option key={c} value={c}>
@@ -197,31 +368,45 @@ export default function ShowcaseSubmitForm({
       <label className="mt-4 block space-y-1">
         <div className="text-sm font-medium">简介</div>
         <textarea
-          className="min-h-[110px] w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950"
+          className={`min-h-[110px] w-full rounded-md border px-3 py-2 text-sm outline-none focus:border-brand-500 dark:bg-neutral-950 ${getFieldError("description") ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-neutral-200 bg-white dark:border-neutral-800"}`}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
+          onBlur={() => handleFieldBlur("description")}
           placeholder="说明这个项目做什么、为什么值得参考（10-1000 字）"
         />
+        {getFieldError("description") && (
+          <p className="text-xs text-red-600">{getFieldError("description")}</p>
+        )}
       </label>
 
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <label className="space-y-1">
           <div className="text-sm font-medium">项目地址</div>
           <input
-            className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950"
+            className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:border-brand-500 dark:bg-neutral-950 ${getFieldError("url") ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-neutral-200 bg-white dark:border-neutral-800"}`}
             value={url}
             onChange={(e) => setUrl(e.target.value)}
+            onBlur={() => handleFieldBlur("url")}
             placeholder="https://example.com"
           />
+          {getFieldError("url") && (
+            <p className="text-xs text-red-600">{getFieldError("url")}</p>
+          )}
         </label>
         <label className="space-y-1">
           <div className="text-sm font-medium">仓库地址（可选）</div>
           <input
-            className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950"
+            className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:border-brand-500 dark:bg-neutral-950 ${getFieldError("repository") ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-neutral-200 bg-white dark:border-neutral-800"}`}
             value={repository}
             onChange={(e) => setRepository(e.target.value)}
+            onBlur={() => handleFieldBlur("repository")}
             placeholder="https://github.com/owner/repo"
           />
+          {getFieldError("repository") && (
+            <p className="text-xs text-red-600">
+              {getFieldError("repository")}
+            </p>
+          )}
         </label>
       </div>
 
@@ -247,17 +432,14 @@ export default function ShowcaseSubmitForm({
         ) : null}
       </label>
 
-      <label className="mt-4 block space-y-1">
-        <div className="text-sm font-medium">
-          内容（可选，支持 Markdown/HTML）
-        </div>
-        <textarea
-          className="min-h-[160px] w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950"
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="写一点实现思路、用到的技术栈、经验总结…"
-        />
-      </label>
+      <MarkdownEditor
+        value={content}
+        onChange={setContent}
+        label="内容（可选，支持 Markdown）"
+        placeholder="写一点实现思路、用到的技术栈、经验总结…"
+        minHeight="160px"
+        error={getFieldError("content")}
+      />
 
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         <label className="space-y-1">

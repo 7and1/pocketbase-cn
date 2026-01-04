@@ -1,3 +1,62 @@
+// ETag generation for HTTP caching (304 Not Modified support)
+function _pbcnGenerateETag(data) {
+  try {
+    var json = JSON.stringify(data || {});
+    if ($security && $security.hs256) {
+      return $security.hs256(json, "pbcn-etag-v1");
+    }
+    // Fallback: simple hash-like string
+    var hash = 0;
+    for (var i = 0; i < json.length; i++) {
+      var ch = json.charCodeAt(i);
+      hash = (hash << 5) - hash + ch;
+      hash = hash & hash;
+    }
+    return "h-" + Math.abs(hash).toString(36);
+  } catch (_) {
+    return Date.now().toString(36);
+  }
+}
+
+// Check if ETag matches and return 304 if so
+function _pbcnCheckETag(c, etag) {
+  try {
+    var ifNoneMatch = "";
+    if (c.request && c.request.header) {
+      ifNoneMatch = c.request.header.get("If-None-Match") || "";
+    }
+    if (ifNoneMatch && ifNoneMatch === etag) {
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+// Set both ETag and Cache-Control headers
+function _pbcnSetCacheHeaders(c, etag, cacheControl) {
+  try {
+    if (c && c.response && c.response.header) {
+      var h = c.response.header();
+      if (etag) h.set("ETag", etag);
+      h.set("Cache-Control", cacheControl);
+      h.set("Vary", "Accept, Accept-Encoding");
+      return;
+    }
+  } catch (_) {}
+  try {
+    if (c && c.response && c.response().header) {
+      var h2 = c.response().header();
+      if (etag) h2.set("ETag", etag);
+      h2.set("Cache-Control", cacheControl);
+      h2.set("Vary", "Accept, Accept-Encoding");
+    }
+  } catch (_) {}
+}
+
+function _pbcnSetCacheControl(c, value) {
+  _pbcnSetCacheHeaders(c, null, value);
+}
+
 routerAdd("GET", "/api/plugins/featured", function (c) {
   var pbcn = require(__hooks + "/lib/pbcn.js");
 
@@ -33,8 +92,19 @@ routerAdd("GET", "/api/plugins/featured", function (c) {
     });
   }
 
-  c.response().header().set("Cache-Control", "public, max-age=300");
-  return c.json(200, { data: data, meta: { total: data.length } });
+  var response = { data: data, meta: { total: data.length } };
+  var etag = _pbcnGenerateETag(response);
+
+  if (_pbcnCheckETag(c, etag)) {
+    return c.noContent(304);
+  }
+
+  _pbcnSetCacheHeaders(
+    c,
+    etag,
+    "public, max-age=300, s-maxage=600, stale-while-revalidate=30",
+  );
+  return c.json(200, response);
 });
 
 routerAdd("GET", "/api/plugins/trending", function (c) {
@@ -104,8 +174,19 @@ routerAdd("GET", "/api/plugins/trending", function (c) {
     });
   }
 
-  c.response().header().set("Cache-Control", "public, max-age=300");
-  return c.json(200, { data: data, meta: { total: data.length } });
+  var response = { data: data, meta: { total: data.length } };
+  var etag = _pbcnGenerateETag(response);
+
+  if (_pbcnCheckETag(c, etag)) {
+    return c.noContent(304);
+  }
+
+  _pbcnSetCacheHeaders(
+    c,
+    etag,
+    "public, max-age=60, s-maxage=300, stale-while-revalidate=15",
+  );
+  return c.json(200, response);
 });
 
 routerAdd("GET", "/api/plugins/list", function (c) {
@@ -191,8 +272,7 @@ routerAdd("GET", "/api/plugins/list", function (c) {
     });
   }
 
-  c.response().header().set("Cache-Control", "public, max-age=60");
-  return c.json(200, {
+  var response = {
     data: data,
     meta: {
       offset: offset,
@@ -200,7 +280,21 @@ routerAdd("GET", "/api/plugins/list", function (c) {
       hasMore: hasMore,
       nextOffset: offset + data.length,
     },
-  });
+  };
+  var etag = _pbcnGenerateETag(response);
+
+  if (_pbcnCheckETag(c, etag)) {
+    return c.noContent(304);
+  }
+
+  // Use shorter cache for search results, longer for filtered lists
+  var cacheAge = q ? 30 : 60;
+  _pbcnSetCacheHeaders(
+    c,
+    etag,
+    "public, max-age=" + cacheAge + ", s-maxage=120, stale-while-revalidate=10",
+  );
+  return c.json(200, response);
 });
 
 routerAdd("GET", "/api/plugins/{slug}", function (c) {
@@ -281,7 +375,7 @@ routerAdd("GET", "/api/plugins/{slug}", function (c) {
     });
   }
 
-  return c.json(200, {
+  var response = {
     data: {
       id: plugin.id,
       name: plugin.get("name"),
@@ -307,7 +401,19 @@ routerAdd("GET", "/api/plugins/{slug}", function (c) {
       },
       versions: v,
     },
-  });
+  };
+  var etag = _pbcnGenerateETag(response);
+
+  if (_pbcnCheckETag(c, etag)) {
+    return c.noContent(304);
+  }
+
+  _pbcnSetCacheHeaders(
+    c,
+    etag,
+    "public, max-age=120, s-maxage=300, stale-while-revalidate=30",
+  );
+  return c.json(200, response);
 });
 
 routerAdd(
@@ -320,6 +426,27 @@ routerAdd(
     if (!authRecord) {
       return c.json(401, {
         error: { code: "UNAUTHORIZED", message: "Authentication required" },
+      });
+    }
+
+    // Validate request timestamp to prevent replay attacks
+    var info = c.requestInfo() || {};
+    var reqTimestamp =
+      info.body && info.body._timestamp ? info.body._timestamp : null;
+    var sec = null;
+    try {
+      sec = require(__hooks + "/lib/security.js");
+    } catch (_) {}
+    if (
+      sec &&
+      sec.validateRequestTimestamp &&
+      !sec.validateRequestTimestamp(reqTimestamp)
+    ) {
+      return c.json(400, {
+        error: {
+          code: "INVALID_TIMESTAMP",
+          message: "Request timestamp invalid or expired",
+        },
       });
     }
 
@@ -482,4 +609,99 @@ routerAdd("GET", "/api/plugins/{slug}/download", function (c) {
   } catch (_) {}
 
   return c.redirect(302, url);
+});
+
+// Batch query endpoint - fetch multiple plugins by slugs in a single request
+// Query: ?slugs=slug1,slug2,slug3 (max 50 slugs)
+routerAdd("GET", "/api/plugins/batch", function (c) {
+  var pbcn = require(__hooks + "/lib/pbcn.js");
+
+  var info = c.requestInfo() || {};
+  var slugsStr = info.query && info.query.slugs ? String(info.query.slugs) : "";
+
+  if (!slugsStr) {
+    return c.json(400, {
+      error: { code: "MISSING_SLUGS", message: "Missing slugs parameter" },
+    });
+  }
+
+  var slugs = [];
+  var parts = slugsStr.split(",");
+  for (var i = 0; i < parts.length; i++) {
+    var s = pbcn.trim(parts[i]);
+    if (s) slugs.push(s);
+  }
+
+  if (slugs.length === 0) {
+    return c.json(400, {
+      error: { code: "INVALID_SLUGS", message: "No valid slugs provided" },
+    });
+  }
+
+  if (slugs.length > 50) {
+    return c.json(400, {
+      error: {
+        code: "TOO_MANY_SLUGS",
+        message: "Maximum 50 slugs per request",
+      },
+    });
+  }
+
+  // Build batch query
+  var placeholders = [];
+  var params = {};
+  for (var j = 0; j < slugs.length; j++) {
+    var key = "slug" + j;
+    placeholders.push("{:" + key + "}");
+    params[key] = slugs[j];
+  }
+
+  var plugins = [];
+  try {
+    var pluginsList = $app.findRecordsByFilter(
+      "plugins",
+      "slug IN (" + placeholders.join(",") + ") && status = 'approved'",
+      "",
+      50,
+      0,
+      params,
+    );
+
+    // Batch load stats
+    var pluginIds = [];
+    for (var k = 0; k < (pluginsList || []).length; k++) {
+      pluginIds.push(pluginsList[k].id);
+    }
+    var statsMap = pbcn.batchLoadPluginStats(pluginIds);
+
+    for (var m = 0; m < (pluginsList || []).length; m++) {
+      var p = pluginsList[m];
+      var stats = statsMap[p.id] || {};
+      plugins.push({
+        id: p.id,
+        name: p.get("name"),
+        slug: p.get("slug"),
+        description: p.get("description"),
+        category: p.get("category") || "",
+        icon: p.get("icon") || "",
+        screenshots: p.get("screenshots") || [],
+        downloads_total: (stats.get ? stats.get("downloads_total") : 0) || 0,
+        stars: (stats.get ? stats.get("stars") : 0) || 0,
+      });
+    }
+  } catch (_) {}
+
+  var response = { data: plugins };
+  var etag = _pbcnGenerateETag(response);
+
+  if (_pbcnCheckETag(c, etag)) {
+    return c.noContent(304);
+  }
+
+  _pbcnSetCacheHeaders(
+    c,
+    etag,
+    "public, max-age=60, s-maxage=300, stale-while-revalidate=15",
+  );
+  return c.json(200, response);
 });

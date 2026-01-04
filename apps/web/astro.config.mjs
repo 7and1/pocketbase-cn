@@ -14,13 +14,16 @@ export default defineConfig({
   site: SITE_URL,
   // Astro v5: default output supports per-route `prerender` (SSR where needed).
   adapter: cloudflare({
-    platformProxy: { enabled: true },
+    platformProxy: { enabled: false }, // Disable to avoid build error
     imageService: "compile",
     routes: {
       strategy: "include",
       include: [
+        "/plugins",
         "/plugins/*",
+        "/showcase",
         "/showcase/*",
+        "/downloads",
         "/downloads/*",
         "/api/*",
         "/auth/*",
@@ -103,6 +106,9 @@ export default defineConfig({
             { label: "阿里云 ECS", slug: "deploy/aliyun-ecs" },
             { label: "腾讯云", slug: "deploy/tencent-cloud" },
             { label: "宝塔面板", slug: "deploy/bt-panel" },
+            { label: "反向代理", slug: "deploy/reverse-proxy" },
+            { label: "Nginx", slug: "deploy/nginx" },
+            { label: "HTTPS", slug: "deploy/https" },
             {
               label: "Cloudflare Workers",
               slug: "deploy/cloudflare-workers",
@@ -134,5 +140,40 @@ export default defineConfig({
     define: {
       __SITE_URL__: JSON.stringify(SITE_URL),
     },
+    build: {
+      cssCodeSplit: true,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            // Split vendor chunks for better caching
+            if (id.includes("node_modules")) {
+              // React ecosystem
+              if (id.includes("react") || id.includes("react-dom")) {
+                return "vendor-react";
+              }
+              // UI libraries
+              if (id.includes("@radix-ui")) {
+                return "vendor-ui";
+              }
+              // Other dependencies
+              return "vendor";
+            }
+          },
+        },
+      },
+    },
+  },
+  image: {
+    remotePatterns: [
+      {
+        hostname: "**.pocketbase.cn",
+      },
+    ],
+    formats: ["webp", "avif"],
+    quality: 85,
+    breakpoints: [320, 640, 960, 1280],
+  },
+  build: {
+    inlineStylesheets: "auto",
   },
 });

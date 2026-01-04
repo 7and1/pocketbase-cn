@@ -3,7 +3,7 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
 import ProfilePanel from "@/components/profile/ProfilePanel";
 ---
 
-<BaseLayout title="个人资料 - PocketBase.cn" description="管理你的 PocketBase.cn 个人资料。">
+<BaseLayout title="个人资料 - PocketBase.cn" description="管理你的 PocketBase.cn 个人资料。" noindex={true}>
   <h1 class="text-2xl font-semibold tracking-tight">个人资料</h1>
   <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
     修改资料后会同步到 PocketBase 用户信息。
@@ -13,4 +13,3 @@ import ProfilePanel from "@/components/profile/ProfilePanel";
     <ProfilePanel client:load />
   </div>
 </BaseLayout>
-

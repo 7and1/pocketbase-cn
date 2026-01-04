@@ -2,6 +2,8 @@ export type UserRole = "user" | "contributor" | "moderator" | "admin";
 
 export interface User {
   id: string;
+  collectionId?: string;
+  collectionName?: string;
   email?: string;
   username?: string;
   name?: string;
@@ -9,5 +11,7 @@ export interface User {
   bio?: string;
   website?: string;
   role?: UserRole;
-  [key: string]: any;
+  created?: string;
+  updated?: string;
+  emailVisibility?: boolean;
 }

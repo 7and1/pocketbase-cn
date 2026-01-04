@@ -13,7 +13,7 @@ export async function GET(context) {
   <channel>
     <title>PocketBase.cn 博客</title>
     <description>PocketBase 技术文章、教程、最佳实践与对比分析</description>
-    <link>${SITE_URL}/blog</link>
+    <link>${SITE_URL}/blog/</link>
     <atom:link href="${SITE_URL}/blog/rss.xml" rel="self" type="application/rss+xml" />
     <language>zh-CN</language>
     <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>

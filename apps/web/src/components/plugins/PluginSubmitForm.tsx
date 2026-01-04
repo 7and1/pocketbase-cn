@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "@nanostores/react";
 import { z } from "zod";
 import { pb } from "@/lib/pocketbase/client";
@@ -10,19 +10,21 @@ import {
 } from "@/lib/stores/auth";
 import { PLUGIN_CATEGORIES } from "@/lib/constants/categories";
 import { slugify } from "@/lib/utils/slug";
+import { pluginSubmitSchema } from "@/lib/schemas";
+import {
+  clearDraft,
+  loadDraft,
+  saveDraft,
+  hasDraft,
+  type DraftData,
+} from "@/lib/utils/draftStore";
+import {
+  createTouchTracker,
+  type FormErrors,
+} from "@/lib/utils/formValidation";
 
-const schema = z.object({
-  name: z.string().min(3).max(100),
-  description: z.string().min(10).max(500),
-  repository: z.string().url(),
-  homepage: z.string().url().optional().or(z.literal("")),
+const schema = pluginSubmitSchema.extend({
   category: z.enum(PLUGIN_CATEGORIES),
-  tags: z.string().optional().or(z.literal("")),
-  license: z.string().max(50).optional().or(z.literal("")),
-  version: z.string().optional().or(z.literal("")),
-  download_url: z.string().url().optional().or(z.literal("")),
-  pocketbase_version: z.string().optional().or(z.literal("")),
-  changelog: z.string().optional().or(z.literal("")),
 });
 
 export interface PluginEditData {
@@ -95,6 +97,11 @@ export default function PluginSubmitForm({
 
   const isEditMode = mode === "edit" && initialData;
 
+  // Draft management
+  const [showDraftBanner, setShowDraftBanner] = useState(false);
+  const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchTracker = useRef(createTouchTracker()).current;
+
   const [name, setName] = useState(initialData?.name || "");
   const [description, setDescription] = useState(
     initialData?.description || "",
@@ -119,10 +126,159 @@ export default function PluginSubmitForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FormErrors>({});
 
   useEffect(() => {
     initAuth();
   }, []);
+
+  // Load draft on mount (only for create mode)
+  useEffect(() => {
+    if (mode === "create" && !initialData) {
+      const draft = loadDraft("plugin", "create");
+      if (draft && Object.keys(draft).length > 0) {
+        setShowDraftBanner(true);
+        if (draft.name) setName(String(draft.name));
+        if (draft.description) setDescription(String(draft.description));
+        if (draft.repository) setRepository(String(draft.repository));
+        if (draft.homepage) setHomepage(String(draft.homepage));
+        if (draft.category)
+          setCategory(draft.category as (typeof PLUGIN_CATEGORIES)[number]);
+        if (draft.tags) setTags(String(draft.tags));
+        if (draft.license) setLicense(String(draft.license));
+        if (draft.version) setVersion(String(draft.version));
+        if (draft.downloadUrl) setDownloadUrl(String(draft.downloadUrl));
+        if (draft.pocketbaseVersion)
+          setPocketbaseVersion(String(draft.pocketbaseVersion));
+        if (draft.changelog) setChangelog(String(draft.changelog));
+      }
+    }
+  }, [mode]);
+
+  // Auto-save draft
+  const saveDraftDebounced = useCallback(() => {
+    if (mode === "edit") return; // Don't save drafts in edit mode
+    if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+    draftSaveTimer.current = setTimeout(() => {
+      const draftData: DraftData = {
+        name,
+        description,
+        repository,
+        homepage,
+        category,
+        tags,
+        license,
+        version,
+        downloadUrl,
+        pocketbaseVersion,
+        changelog,
+      };
+      saveDraft("plugin", draftData, "create");
+    }, 1000);
+  }, [
+    name,
+    description,
+    repository,
+    homepage,
+    category,
+    tags,
+    license,
+    version,
+    downloadUrl,
+    pocketbaseVersion,
+    changelog,
+    mode,
+  ]);
+
+  useEffect(() => {
+    saveDraftDebounced();
+    return () => {
+      if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+    };
+  }, [saveDraftDebounced]);
+
+  // Restore draft from banner
+  const handleRestoreDraft = () => {
+    setShowDraftBanner(false);
+  };
+
+  // Clear draft
+  const handleClearDraft = () => {
+    clearDraft("plugin", "create");
+    setShowDraftBanner(false);
+    // Reset form
+    setName("");
+    setDescription("");
+    setRepository("");
+    setHomepage("");
+    setCategory("utility");
+    setTags("");
+    setLicense("MIT");
+    setVersion("");
+    setDownloadUrl("");
+    setPocketbaseVersion("");
+    setChangelog("");
+    touchTracker.reset();
+    setFieldErrors({});
+  };
+
+  // Validate field on blur
+  const handleFieldBlur = useCallback(
+    (fieldName: string) => {
+      touchTracker.touch(fieldName);
+      const data = {
+        name,
+        description,
+        repository,
+        homepage,
+        category,
+        tags,
+        license,
+        version,
+        download_url: downloadUrl,
+        pocketbase_version: pocketbaseVersion,
+        changelog,
+      };
+      try {
+        schema.parse({
+          ...data,
+          [fieldName]: data[fieldName as keyof typeof data],
+        });
+        setFieldErrors((prev) => {
+          const next = { ...prev };
+          delete next[fieldName];
+          return next;
+        });
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          const issue = err.issues.find((i) => i.path.join(".") === fieldName);
+          if (issue) {
+            setFieldErrors((prev) => ({ ...prev, [fieldName]: issue.message }));
+          }
+        }
+      }
+    },
+    [
+      name,
+      description,
+      repository,
+      homepage,
+      category,
+      tags,
+      license,
+      version,
+      downloadUrl,
+      pocketbaseVersion,
+      changelog,
+      touchTracker,
+    ],
+  );
+
+  const getFieldError = (fieldName: string) => {
+    return touchTracker.isTouched(fieldName)
+      ? fieldErrors[fieldName]
+      : undefined;
+  };
 
   const tagPreview = useMemo(() => parseTags(tags), [tags]);
 
@@ -246,6 +402,8 @@ export default function PluginSubmitForm({
             }
 
             setOk("提交成功，已进入审核队列。");
+            // Clear draft on successful submission
+            clearDraft("plugin", "create");
             window.setTimeout(() => {
               window.location.href = "/dashboard";
             }, 600);
@@ -258,7 +416,7 @@ export default function PluginSubmitForm({
             Array.isArray(err.issues) &&
             err.issues[0]?.message
           ) {
-            setError(err.issues[0].message);
+            setError(String(err.issues[0].message));
           } else {
             const message = err instanceof Error ? err.message : "提交失败";
             setError(message);
@@ -268,22 +426,53 @@ export default function PluginSubmitForm({
         }
       }}
     >
+      {/* Draft restoration banner */}
+      {showDraftBanner ? (
+        <div className="mb-4 flex items-center justify-between rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-950/30">
+          <span className="text-amber-800 dark:text-amber-300">
+            Found a saved draft. Would you like to restore it?
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleClearDraft}
+              className="rounded px-2 py-1 text-xs text-amber-700 hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-900/30"
+            >
+              Dismiss
+            </button>
+            <button
+              type="button"
+              onClick={handleRestoreDraft}
+              className="rounded bg-amber-600 px-2 py-1 text-xs text-white hover:bg-amber-700"
+            >
+              Restore Draft
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="grid gap-4 md:grid-cols-2">
         <label className="space-y-1">
           <div className="text-sm font-medium">插件名称</div>
           <input
-            className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950"
+            className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:border-brand-500 dark:bg-neutral-950 ${getFieldError("name") ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-neutral-200 bg-white dark:border-neutral-800"}`}
             value={name}
             onChange={(e) => setName(e.target.value)}
+            onBlur={() => handleFieldBlur("name")}
             placeholder="例如：PB OSS Storage"
           />
+          {getFieldError("name") && (
+            <p className="text-xs text-red-600">{getFieldError("name")}</p>
+          )}
         </label>
         <label className="space-y-1">
           <div className="text-sm font-medium">分类</div>
           <select
             className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950"
             value={category}
-            onChange={(e) => setCategory(e.target.value as any)}
+            onChange={(e) =>
+              setCategory(e.target.value as (typeof PLUGIN_CATEGORIES)[number])
+            }
           >
             {PLUGIN_CATEGORIES.map((c) => (
               <option key={c} value={c}>
@@ -297,31 +486,45 @@ export default function PluginSubmitForm({
       <label className="mt-4 block space-y-1">
         <div className="text-sm font-medium">简介</div>
         <textarea
-          className="min-h-[110px] w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950"
+          className={`min-h-[110px] w-full rounded-md border px-3 py-2 text-sm outline-none focus:border-brand-500 dark:bg-neutral-950 ${getFieldError("description") ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-neutral-200 bg-white dark:border-neutral-800"}`}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
+          onBlur={() => handleFieldBlur("description")}
           placeholder="一句话说明这个插件解决什么问题（10-500 字）"
         />
+        {getFieldError("description") && (
+          <p className="text-xs text-red-600">{getFieldError("description")}</p>
+        )}
       </label>
 
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <label className="space-y-1">
           <div className="text-sm font-medium">仓库地址（GitHub/Gitee）</div>
           <input
-            className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950"
+            className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:border-brand-500 dark:bg-neutral-950 ${getFieldError("repository") ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-neutral-200 bg-white dark:border-neutral-800"}`}
             value={repository}
             onChange={(e) => setRepository(e.target.value)}
+            onBlur={() => handleFieldBlur("repository")}
             placeholder="https://github.com/owner/repo"
           />
+          {getFieldError("repository") && (
+            <p className="text-xs text-red-600">
+              {getFieldError("repository")}
+            </p>
+          )}
         </label>
         <label className="space-y-1">
           <div className="text-sm font-medium">主页（可选）</div>
           <input
-            className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950"
+            className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:border-brand-500 dark:bg-neutral-950 ${getFieldError("homepage") ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-neutral-200 bg-white dark:border-neutral-800"}`}
             value={homepage}
             onChange={(e) => setHomepage(e.target.value)}
+            onBlur={() => handleFieldBlur("homepage")}
             placeholder="https://example.com"
           />
+          {getFieldError("homepage") && (
+            <p className="text-xs text-red-600">{getFieldError("homepage")}</p>
+          )}
         </label>
       </div>
 

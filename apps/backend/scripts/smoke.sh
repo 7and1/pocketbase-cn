@@ -31,27 +31,28 @@ if [[ -n "$csrf_token" ]]; then
   fi
 fi
 
-# Rate limiting test (multiple rapid requests)
-rate_limit_hit=false
-for i in {1..50}; do
-  http_code="$(curl -s -o /dev/null -w "%{http_code}" "$PB_URL/api/health" 2>/dev/null || echo "000")"
-  if [[ "$http_code" == "429" ]]; then
-    rate_limit_hit=true
-    break
-  fi
-done
-if [[ "$rate_limit_hit" == "true" ]]; then
-  echo "[smoke] rate limiting ok (429 returned)"
-else
-  echo "[smoke] rate limiting not triggered (may not be configured)"
-fi
-
 plugins_json="$(curl -fsS "$PB_URL/api/plugins/list?limit=1&offset=0")"
 plugin_slug="$(echo "$plugins_json" | jq -r '.data[0].slug // empty')"
 if [[ -n "$plugin_slug" ]]; then
   curl -fsS "$PB_URL/api/plugins/$plugin_slug" >/dev/null
   curl -fsS "$PB_URL/api/comments/list?plugin=$plugin_slug" >/dev/null
   echo "[smoke] plugin ok: $plugin_slug"
+
+  # Rate limiting test (downloads endpoint)
+  # This endpoint is safe and doesn't require auth. It should return 429 after enough hits.
+  rate_limit_hit=false
+  for i in {1..40}; do
+    http_code="$(curl -s -o /dev/null -w "%{http_code}" "$PB_URL/api/plugins/$plugin_slug/download" 2>/dev/null || echo "000")"
+    if [[ "$http_code" == "429" ]]; then
+      rate_limit_hit=true
+      break
+    fi
+  done
+  if [[ "$rate_limit_hit" == "true" ]]; then
+    echo "[smoke] rate limiting ok (429 returned on download)"
+  else
+    echo "[smoke] rate limiting not triggered on download (may be misconfigured)"
+  fi
 else
   echo "[smoke] plugin list empty (ok)"
 fi

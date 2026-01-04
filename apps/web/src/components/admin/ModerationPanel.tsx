@@ -104,7 +104,7 @@ export default function ModerationPanel() {
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
       <section className="space-y-3">
-        <div className="flex items-end justify-between gap-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h2 className="text-lg font-semibold">待审核插件</h2>
             <p className="text-sm text-neutral-600 dark:text-neutral-400">
@@ -113,7 +113,7 @@ export default function ModerationPanel() {
           </div>
           <button
             type="button"
-            className="text-sm font-medium text-brand-700 hover:underline dark:text-brand-300"
+            className="min-h-[44px] self-start rounded-md px-4 py-2 text-sm font-medium text-brand-700 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:text-brand-300"
             onClick={() => refresh()}
           >
             刷新
@@ -133,7 +133,7 @@ export default function ModerationPanel() {
                 <button
                   type="button"
                   disabled={busyId === p.id}
-                  className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+                  className="min-h-[44px] rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
                   onClick={() => setStatus("plugins", p.id, "approved")}
                 >
                   通过
@@ -141,7 +141,7 @@ export default function ModerationPanel() {
                 <button
                   type="button"
                   disabled={busyId === p.id}
-                  className="rounded-md border border-neutral-200 px-3 py-1.5 text-sm font-medium hover:bg-neutral-50 disabled:opacity-60 dark:border-neutral-800 dark:hover:bg-neutral-900"
+                  className="min-h-[44px] rounded-md border border-neutral-200 px-4 py-2 text-sm font-medium hover:bg-neutral-50 disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:border-neutral-800 dark:hover:bg-neutral-900"
                   onClick={() => setStatus("plugins", p.id, "rejected")}
                 >
                   拒绝
@@ -171,7 +171,7 @@ export default function ModerationPanel() {
                 <button
                   type="button"
                   disabled={busyId === s.id}
-                  className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+                  className="min-h-[44px] rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
                   onClick={() => setStatus("showcase", s.id, "approved")}
                 >
                   通过
@@ -179,7 +179,7 @@ export default function ModerationPanel() {
                 <button
                   type="button"
                   disabled={busyId === s.id}
-                  className="rounded-md border border-neutral-200 px-3 py-1.5 text-sm font-medium hover:bg-neutral-50 disabled:opacity-60 dark:border-neutral-800 dark:hover:bg-neutral-900"
+                  className="min-h-[44px] rounded-md border border-neutral-200 px-4 py-2 text-sm font-medium hover:bg-neutral-50 disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:border-neutral-800 dark:hover:bg-neutral-900"
                   onClick={() => setStatus("showcase", s.id, "rejected")}
                 >
                   拒绝
@@ -208,7 +208,7 @@ export default function ModerationPanel() {
                 <button
                   type="button"
                   disabled={busyId === c.id}
-                  className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+                  className="min-h-[44px] rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
                   onClick={() => setStatus("comments", c.id, "approved")}
                 >
                   通过
@@ -216,7 +216,7 @@ export default function ModerationPanel() {
                 <button
                   type="button"
                   disabled={busyId === c.id}
-                  className="rounded-md border border-neutral-200 px-3 py-1.5 text-sm font-medium hover:bg-neutral-50 disabled:opacity-60 dark:border-neutral-800 dark:hover:bg-neutral-900"
+                  className="min-h-[44px] rounded-md border border-neutral-200 px-4 py-2 text-sm font-medium hover:bg-neutral-50 disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:border-neutral-800 dark:hover:bg-neutral-900"
                   onClick={() => setStatus("comments", c.id, "rejected")}
                 >
                   拒绝
@@ -224,7 +224,7 @@ export default function ModerationPanel() {
                 <button
                   type="button"
                   disabled={busyId === c.id}
-                  className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-950"
+                  className="min-h-[44px] rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-950"
                   onClick={() => setStatus("comments", c.id, "spam")}
                 >
                   Spam

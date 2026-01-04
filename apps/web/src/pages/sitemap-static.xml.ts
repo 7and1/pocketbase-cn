@@ -4,14 +4,12 @@ export async function GET() {
   const now = new Date().toISOString();
 
   const staticPages = [
-    { path: "", priority: "1.0", changefreq: "daily" },
-    { path: "/docs", priority: "0.9", changefreq: "daily" },
-    { path: "/blog", priority: "0.8", changefreq: "daily" },
-    { path: "/plugins", priority: "0.8", changefreq: "daily" },
-    { path: "/showcase", priority: "0.8", changefreq: "weekly" },
-    { path: "/downloads", priority: "0.9", changefreq: "weekly" },
-    { path: "/legal/terms", priority: "0.3", changefreq: "monthly" },
-    { path: "/legal/privacy", priority: "0.3", changefreq: "monthly" },
+    { path: "/", priority: "1.0", changefreq: "daily" },
+    { path: "/plugins/", priority: "0.8", changefreq: "daily" },
+    { path: "/showcase/", priority: "0.8", changefreq: "weekly" },
+    { path: "/downloads/", priority: "0.9", changefreq: "weekly" },
+    { path: "/legal/terms/", priority: "0.3", changefreq: "monthly" },
+    { path: "/legal/privacy/", priority: "0.3", changefreq: "monthly" },
   ];
 
   const sitemap = `

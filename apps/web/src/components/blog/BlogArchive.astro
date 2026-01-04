@@ -1,0 +1,219 @@
+---
+import { TAGS_SIDEBAR_LIMIT } from "@/lib/constants/blog";
+
+const {
+  heading = "博客",
+  intro = "PocketBase 技术文章、教程、最佳实践与对比分析。",
+  posts = [],
+  categories = [],
+  tags = [],
+  selectedCategory = "",
+  selectedTag = "",
+  currentPage = 1,
+  totalPages = 1,
+  urlForPage = (pageNum) => (pageNum <= 1 ? "/blog/" : `/blog/page/${pageNum}/`),
+} = Astro.props;
+
+const hasFilters = Boolean(selectedCategory || selectedTag);
+const selectedTagFirst = selectedTag ? [selectedTag] : [];
+const sidebarTags = Array.from(
+  new Set([...selectedTagFirst, ...tags]),
+).slice(0, TAGS_SIDEBAR_LIMIT);
+---
+
+<div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+  <div>
+    <h1 class="text-2xl font-semibold tracking-tight">{heading}</h1>
+    <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+      {intro}
+    </p>
+  </div>
+
+  <a
+    class="inline-flex items-center justify-center rounded-md border border-neutral-200 px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-800 dark:text-neutral-200 dark:hover:bg-neutral-900"
+    href="/blog/rss.xml"
+  >
+    RSS
+  </a>
+</div>
+
+<div class="mt-6 flex flex-col gap-6 lg:flex-row">
+  <aside class="w-full lg:w-56 lg:flex-shrink-0">
+    <div class="rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
+      <div class="flex items-center justify-between gap-3">
+        <h3 class="text-sm font-semibold">分类</h3>
+        <a
+          class="text-xs text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200"
+          href="/blog/categories/"
+        >
+          全部分类
+        </a>
+      </div>
+      <ul class="mt-3 space-y-2">
+        <li>
+          <a
+            href="/blog/"
+            class={!selectedCategory ? "font-medium text-brand-700 dark:text-brand-300" : "text-sm text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white"}
+          >
+            全部
+          </a>
+        </li>
+        {categories.map((cat) => (
+          <li>
+            <a
+              href={`/blog/category/${encodeURIComponent(cat)}/`}
+              class={selectedCategory === cat ? "font-medium text-brand-700 dark:text-brand-300" : "text-sm text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white"}
+            >
+              {cat}
+            </a>
+          </li>
+        ))}
+      </ul>
+
+      <div class="mt-6 flex items-center justify-between gap-3">
+        <h3 class="text-sm font-semibold">标签</h3>
+        <a
+          class="text-xs text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200"
+          href="/blog/tags/"
+        >
+          全部标签
+        </a>
+      </div>
+
+      <div class="mt-3 flex flex-wrap gap-2">
+        {sidebarTags.map((tag) => (
+          <a
+            href={`/blog/tag/${encodeURIComponent(tag)}/`}
+            class={selectedTag === tag
+              ? "rounded bg-brand-100 px-2 py-1 text-xs font-medium text-brand-800 dark:bg-brand-900 dark:text-brand-100"
+              : "rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+            }
+          >
+            {tag}
+          </a>
+        ))}
+      </div>
+    </div>
+  </aside>
+
+  <div class="flex-1">
+    {hasFilters ? (
+      <div class="mb-4 flex flex-wrap items-center gap-2 text-sm">
+        <span class="text-neutral-600 dark:text-neutral-400">筛选:</span>
+        {selectedCategory ? (
+          <span class="rounded bg-neutral-100 px-2 py-1 dark:bg-neutral-800">
+            分类: {selectedCategory}
+            <a href="/blog/" class="ml-2 text-neutral-500 hover:text-neutral-700">&times;</a>
+          </span>
+        ) : null}
+        {selectedTag ? (
+          <span class="rounded bg-neutral-100 px-2 py-1 dark:bg-neutral-800">
+            标签: {selectedTag}
+            <a href="/blog/" class="ml-2 text-neutral-500 hover:text-neutral-700">&times;</a>
+          </span>
+        ) : null}
+      </div>
+    ) : null}
+
+    {posts.length === 0 ? (
+      <div class="rounded-xl border border-neutral-200 p-8 text-center dark:border-neutral-800">
+        <p class="text-neutral-600 dark:text-neutral-400">暂无文章</p>
+      </div>
+    ) : (
+      <div class="grid gap-6">
+        {posts.map((post) => {
+          const publishDate = new Date(post.data.publishDate).toLocaleDateString("zh-CN", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+          });
+
+          return (
+            <article class="group rounded-xl border border-neutral-200 p-5 transition-colors hover:border-neutral-300 dark:border-neutral-800 dark:hover:border-neutral-700">
+              <div class="flex items-start justify-between gap-4">
+                <div class="flex-1">
+                  <div class="flex flex-wrap items-center gap-2 text-sm">
+                    <a
+                      href={`/blog/category/${encodeURIComponent(post.data.category)}/`}
+                      class="rounded bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 dark:bg-brand-900/30 dark:text-brand-300"
+                    >
+                      {post.data.category}
+                    </a>
+                    <time class="text-neutral-500 dark:text-neutral-400">
+                      {publishDate}
+                    </time>
+                  </div>
+
+                  <a href={`/blog/${post.slug}/`}>
+                    <h2 class="mt-2 text-lg font-semibold group-hover:text-brand-700 dark:group-hover:text-brand-300">
+                      {post.data.title}
+                    </h2>
+                  </a>
+
+                  <p class="mt-2 line-clamp-2 text-sm text-neutral-600 dark:text-neutral-400">
+                    {post.data.description}
+                  </p>
+
+                  {post.data.tags.length > 0 ? (
+                    <div class="mt-3 flex flex-wrap gap-2">
+                      {post.data.tags.slice(0, 5).map((tag) => (
+                        <a
+                          href={`/blog/tag/${encodeURIComponent(tag)}/`}
+                          class="text-xs text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-300"
+                        >
+                          #{tag}
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+
+                {post.data.featured ? (
+                  <span class="rounded bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+                    精选
+                  </span>
+                ) : null}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    )}
+
+    {totalPages > 1 ? (
+      <nav class="mt-8 flex items-center justify-center gap-2" aria-label="分页">
+        {currentPage > 1 ? (
+          <a
+            href={urlForPage(currentPage - 1)}
+            class="rounded-md border border-neutral-200 px-3 py-1.5 text-sm hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900"
+            rel="prev"
+          >
+            上一页
+          </a>
+        ) : (
+          <span class="rounded-md border border-neutral-200 px-3 py-1.5 text-sm text-neutral-400 dark:border-neutral-800">
+            上一页
+          </span>
+        )}
+
+        <span class="text-sm text-neutral-600 dark:text-neutral-400">
+          第 {currentPage} / {totalPages} 页
+        </span>
+
+        {currentPage < totalPages ? (
+          <a
+            href={urlForPage(currentPage + 1)}
+            class="rounded-md border border-neutral-200 px-3 py-1.5 text-sm hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900"
+            rel="next"
+          >
+            下一页
+          </a>
+        ) : (
+          <span class="rounded-md border border-neutral-200 px-3 py-1.5 text-sm text-neutral-400 dark:border-neutral-800">
+            下一页
+          </span>
+        )}
+      </nav>
+    ) : null}
+  </div>
+</div>

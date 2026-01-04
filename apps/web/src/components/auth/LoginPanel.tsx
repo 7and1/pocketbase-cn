@@ -23,11 +23,11 @@ export default function LoginPanel() {
   }, []);
 
   return (
-    <div className="rounded-xl border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-950">
+    <div className="rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950 sm:p-5">
       <div className="flex gap-2">
         <button
           type="button"
-          className={`flex-1 rounded-md px-3 py-2 text-sm font-medium ${mode === "github" ? "bg-brand-600 text-white hover:bg-brand-700" : "border border-neutral-200 bg-white hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950 dark:hover:bg-neutral-900"}`}
+          className={`flex min-h-[44px] flex-1 rounded-md px-3 py-3 text-sm font-medium sm:py-2 ${mode === "github" ? "bg-brand-600 text-white hover:bg-brand-700" : "border border-neutral-200 bg-white hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950 dark:hover:bg-neutral-900"}`}
           onClick={() => setMode("github")}
         >
           GitHub OAuth
@@ -35,7 +35,7 @@ export default function LoginPanel() {
         {enablePasswordLogin ? (
           <button
             type="button"
-            className={`flex-1 rounded-md px-3 py-2 text-sm font-medium ${mode === "password" ? "bg-brand-600 text-white hover:bg-brand-700" : "border border-neutral-200 bg-white hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950 dark:hover:bg-neutral-900"}`}
+            className={`flex min-h-[44px] flex-1 rounded-md px-3 py-3 text-sm font-medium sm:py-2 ${mode === "password" ? "bg-brand-600 text-white hover:bg-brand-700" : "border border-neutral-200 bg-white hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950 dark:hover:bg-neutral-900"}`}
             onClick={() => setMode("password")}
           >
             邮箱密码
@@ -46,7 +46,7 @@ export default function LoginPanel() {
       {mode === "github" ? (
         <button
           type="button"
-          className="mt-3 w-full rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+          className="mt-3 flex min-h-[48px] w-full items-center justify-center rounded-md bg-brand-600 px-4 py-3 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60 sm:py-2 sm:px-3"
           disabled={loading}
           onClick={async () => {
             setError(null);
@@ -89,14 +89,14 @@ export default function LoginPanel() {
           }}
         >
           <input
-            className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950"
+            className="w-full rounded-md border border-neutral-200 bg-white px-4 py-3 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950 sm:px-3 sm:py-2"
             placeholder="邮箱或用户名"
             value={identity}
             onChange={(e) => setIdentity(e.target.value)}
             autoComplete="username"
           />
           <input
-            className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950"
+            className="w-full rounded-md border border-neutral-200 bg-white px-4 py-3 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950 sm:px-3 sm:py-2"
             placeholder="密码"
             type="password"
             value={password}
@@ -105,7 +105,7 @@ export default function LoginPanel() {
           />
           <button
             type="submit"
-            className="w-full rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+            className="flex min-h-[48px] w-full items-center justify-center rounded-md bg-brand-600 px-4 py-3 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60 sm:py-2 sm:px-3"
             disabled={loading}
           >
             {loading ? "登录中…" : "登录"}

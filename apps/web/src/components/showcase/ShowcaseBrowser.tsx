@@ -1,18 +1,35 @@
+import { useState } from "react";
 import type { ShowcaseItem } from "@/lib/types/showcase";
 import { SHOWCASE_CATEGORIES } from "@/lib/constants/categories";
 import { pocketbaseFileUrl } from "@/lib/utils/fileUrl";
 import { GridSkeleton } from "@/components/ui/Skeleton";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import {
+  MobileFilterDrawer,
+  FilterToggleButton,
+} from "@/components/ui/MobileFilterDrawer";
 import { usePaginatedListWithFilters } from "@/hooks/usePaginatedList";
+import type { InitialPaginatedData } from "@/hooks/usePaginatedList";
+
+type InitialListState = InitialPaginatedData<ShowcaseItem>;
 
 const SHOWCASE_SORT_OPTIONS = [
+  { value: "-featured,-created", label: "精选优先" },
   { value: "-created", label: "最新" },
   { value: "-votes", label: "最多投票" },
   { value: "-views", label: "最多浏览" },
   { value: "title", label: "名称" },
 ];
 
-function ShowcaseBrowserContent() {
+function ShowcaseBrowserContent({
+  initialParams,
+  initial,
+}: {
+  initialParams?: { query: string; category: string; sort: string };
+  initial?: InitialListState;
+}) {
+  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
+
   const {
     items,
     loading,
@@ -29,12 +46,17 @@ function ShowcaseBrowserContent() {
     sentinelRef,
   } = usePaginatedListWithFilters<ShowcaseItem>({
     endpoint: "/api/showcase/list",
-    defaultSort: "-created",
+    defaultSort: "-featured,-created",
     sortOptions: SHOWCASE_SORT_OPTIONS,
+    initialParams,
+    initial,
   });
+
+  const activeFilterCount = category ? 1 : 0;
 
   return (
     <div className="space-y-4">
+      {/* Search and Filter Bar */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center">
         <div className="relative flex-1">
           <label htmlFor="showcase-search" className="sr-only">
@@ -42,14 +64,14 @@ function ShowcaseBrowserContent() {
           </label>
           <input
             id="showcase-search"
-            className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 pl-9 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-neutral-800 dark:bg-neutral-950"
+            className="w-full rounded-md border border-neutral-200 bg-white px-4 py-3 pl-10 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-neutral-800 dark:bg-neutral-950 md:py-2 md:pl-9"
             placeholder="搜索案例（标题/描述）"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             autoComplete="off"
           />
           <svg
-            className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400"
+            className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400 md:left-3"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -63,38 +85,62 @@ function ShowcaseBrowserContent() {
             />
           </svg>
         </div>
-        <label htmlFor="showcase-category" className="sr-only">
-          分类筛选
-        </label>
-        <select
-          id="showcase-category"
-          className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-neutral-800 dark:bg-neutral-950 md:w-44"
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-        >
-          <option value="">全部分类</option>
-          {SHOWCASE_CATEGORIES.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-        <label htmlFor="showcase-sort" className="sr-only">
-          排序方式
-        </label>
-        <select
-          id="showcase-sort"
-          className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-neutral-800 dark:bg-neutral-950 md:w-36"
-          value={sort}
-          onChange={(e) => setSort(e.target.value)}
-        >
-          {SHOWCASE_SORT_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+
+        {/* Mobile Filter Button */}
+        <FilterToggleButton
+          onClick={() => setFilterDrawerOpen(true)}
+          count={activeFilterCount}
+        />
+
+        {/* Desktop Filter Controls */}
+        <div className="hidden gap-3 md:flex">
+          <label htmlFor="showcase-category" className="sr-only">
+            分类筛选
+          </label>
+          <select
+            id="showcase-category"
+            className="w-44 rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-neutral-800 dark:bg-neutral-950"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+          >
+            <option value="">全部分类</option>
+            {SHOWCASE_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+          <label htmlFor="showcase-sort" className="sr-only">
+            排序方式
+          </label>
+          <select
+            id="showcase-sort"
+            className="w-36 rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-neutral-800 dark:bg-neutral-950"
+            value={sort}
+            onChange={(e) => setSort(e.target.value)}
+          >
+            {SHOWCASE_SORT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
+
+      {/* Mobile Filter Drawer */}
+      <MobileFilterDrawer
+        open={filterDrawerOpen}
+        onClose={() => setFilterDrawerOpen(false)}
+        categories={SHOWCASE_CATEGORIES}
+        category={category}
+        onCategoryChange={setCategory}
+        sortOptions={SHOWCASE_SORT_OPTIONS}
+        sort={sort}
+        onSortChange={setSort}
+        categoryLabel="案例分类"
+        sortLabel="排序方式"
+      />
 
       {error ? (
         <div
@@ -134,6 +180,7 @@ function ShowcaseBrowserContent() {
                 alt={`${s.title} preview`}
                 className="mb-3 aspect-video w-full rounded-lg border border-neutral-200 object-cover dark:border-neutral-800"
                 loading="lazy"
+                decoding="async"
                 width={320}
                 height={240}
               />
@@ -190,10 +237,16 @@ function ShowcaseBrowserContent() {
   );
 }
 
-export default function ShowcaseBrowser() {
+export default function ShowcaseBrowser(props: {
+  initialParams?: { query: string; category: string; sort: string };
+  initial?: InitialListState;
+}) {
   return (
     <ErrorBoundary>
-      <ShowcaseBrowserContent />
+      <ShowcaseBrowserContent
+        initialParams={props.initialParams}
+        initial={props.initial}
+      />
     </ErrorBoundary>
   );
 }

@@ -1,7 +1,9 @@
 ---
 title: "Vue 3 + PocketBase 完整集成教程"
 description: "从零开始学习如何在 Vue 3 项目中集成 PocketBase，包含认证、CRUD 操作、实时功能、状态管理和生产部署的完整指南。"
+excerpt: "本教程将指导你完成 Vue 3 与 PocketBase 的完整集成，涵盖从项目初始化到生产部署的全部流程。我们将使用 Vue 3 Composition API、Pinia 状态管理，以及 PocketBase JavaScript SDK。"
 publishDate: 2024-12-05
+updatedDate: 2024-12-20
 category: "教程"
 tags: ["Vue", "PocketBase", "前端开发", "集成教程"]
 author: "PocketBase.cn"
@@ -86,14 +88,14 @@ src/
 
 创建 `.env` 文件：
 
-```env
+```ini
 VITE_PB_URL=http://localhost:8090
 VITE_PB_URL_PROD=https://api.yourserver.com
 ```
 
 创建 `.env.production` 文件：
 
-```env
+```ini
 VITE_PB_URL=https://api.yourserver.com
 ```
 
@@ -1694,7 +1696,7 @@ export default router;
 
 确保在生产环境中设置正确的 PocketBase URL：
 
-```env
+```ini
 # .env.production
 VITE_PB_URL=https://api.yourserver.com
 ```

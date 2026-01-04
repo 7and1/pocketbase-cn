@@ -1,7 +1,9 @@
 ---
 title: "PocketBase 生产部署完整清单"
 description: "PocketBase 生产环境部署的完整检查清单，涵盖安全配置、性能优化、监控备份、容灾恢复等各个方面，确保你的应用稳定可靠地运行。"
+excerpt: "将 PocketBase 部署到生产环境需要仔细规划和执行。本文提供了一份全面的部署清单，从安全配置、性能优化到监控备份、容灾恢复，帮助你确保应用在生产环境中安全、稳定、高效地运行。"
 publishDate: 2024-11-28
+updatedDate: 2024-12-20
 category: "运维部署"
 tags: ["生产部署", "DevOps", "安全", "监控", "备份"]
 author: "PocketBase.cn"
@@ -174,7 +176,7 @@ server {
 
 #### Caddy 配置（自动 HTTPS）
 
-```caddyfile
+```txt
 api.example.com {
     reverse_proxy 127.0.0.1:8090
 

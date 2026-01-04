@@ -1,3 +1,61 @@
+// ETag generation for HTTP caching
+function _pbcnGenerateETag(data) {
+  try {
+    var json = JSON.stringify(data || {});
+    if ($security && $security.hs256) {
+      return $security.hs256(json, "pbcn-etag-v1");
+    }
+    var hash = 0;
+    for (var i = 0; i < json.length; i++) {
+      var ch = json.charCodeAt(i);
+      hash = (hash << 5) - hash + ch;
+      hash = hash & hash;
+    }
+    return "h-" + Math.abs(hash).toString(36);
+  } catch (_) {
+    return Date.now().toString(36);
+  }
+}
+
+// Check if ETag matches and return 304 if so
+function _pbcnCheckETag(c, etag) {
+  try {
+    var ifNoneMatch = "";
+    if (c.request && c.request.header) {
+      ifNoneMatch = c.request.header.get("If-None-Match") || "";
+    }
+    if (ifNoneMatch && ifNoneMatch === etag) {
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+// Set both ETag and Cache-Control headers
+function _pbcnSetCacheHeaders(c, etag, cacheControl) {
+  try {
+    if (c && c.response && c.response.header) {
+      var h = c.response.header();
+      if (etag) h.set("ETag", etag);
+      h.set("Cache-Control", cacheControl);
+      h.set("Vary", "Accept, Accept-Encoding");
+      return;
+    }
+  } catch (_) {}
+  try {
+    if (c && c.response && c.response().header) {
+      var h2 = c.response().header();
+      if (etag) h2.set("ETag", etag);
+      h2.set("Cache-Control", cacheControl);
+      h2.set("Vary", "Accept, Accept-Encoding");
+    }
+  } catch (_) {}
+}
+
+function _pbcnSetCacheControl(c, value) {
+  _pbcnSetCacheHeaders(c, null, value);
+}
+
 routerAdd("GET", "/api/downloads/versions", function (c) {
   var pbcn = require(__hooks + "/lib/pbcn.js");
 
@@ -14,8 +72,20 @@ routerAdd("GET", "/api/downloads/versions", function (c) {
   }
 
   versions.sort(pbcn.semverDesc);
-  c.response().header().set("Cache-Control", "public, max-age=300");
-  return c.json(200, { data: versions });
+
+  var response = { data: versions };
+  var etag = _pbcnGenerateETag(response);
+
+  if (_pbcnCheckETag(c, etag)) {
+    return c.noContent(304);
+  }
+
+  _pbcnSetCacheHeaders(
+    c,
+    etag,
+    "public, max-age=600, s-maxage=1800, stale-while-revalidate=60",
+  );
+  return c.json(200, response);
 });
 
 routerAdd("GET", "/api/downloads/files", function (c) {
@@ -57,8 +127,19 @@ routerAdd("GET", "/api/downloads/files", function (c) {
     });
   }
 
-  c.response().header().set("Cache-Control", "public, max-age=300");
-  return c.json(200, { data: data });
+  var response = { data: data };
+  var etag = _pbcnGenerateETag(response);
+
+  if (_pbcnCheckETag(c, etag)) {
+    return c.noContent(304);
+  }
+
+  _pbcnSetCacheHeaders(
+    c,
+    etag,
+    "public, max-age=600, s-maxage=1800, stale-while-revalidate=60",
+  );
+  return c.json(200, response);
 });
 
 routerAdd("POST", "/api/downloads/track", function (c) {

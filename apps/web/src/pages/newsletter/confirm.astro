@@ -13,7 +13,7 @@ if (token) {
 }
 ---
 
-<BaseLayout title="确认订阅 - PocketBase.cn" description="确认订阅 PocketBase 版本更新通知。">
+<BaseLayout title="确认订阅 - PocketBase.cn" description="确认订阅 PocketBase 版本更新通知。" noindex={true}>
   <h1 class="text-2xl font-semibold tracking-tight">确认订阅</h1>
   {status === "confirmed" ? (
     <p class="mt-3 text-neutral-700 dark:text-neutral-300">订阅已确认。感谢支持！</p>
@@ -26,4 +26,3 @@ if (token) {
     <a class="text-brand-700 hover:underline dark:text-brand-300" href="/downloads">返回下载页</a>
   </div>
 </BaseLayout>
-

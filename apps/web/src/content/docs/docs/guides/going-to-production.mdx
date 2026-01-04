@@ -44,7 +44,7 @@ description: PocketBase 生产环境部署的完整清单，包括 SSL、备份�
 
 Caddy 是最简单的选择，自动处理 HTTPS 证书：
 
-```caddyfile
+```txt
 # /etc/caddy/Caddyfile
 your-domain.com {
     reverse_proxy 127.0.0.1:8090

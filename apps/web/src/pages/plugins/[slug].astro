@@ -6,6 +6,7 @@ import { POCKETBASE_URL } from "@/lib/constants/config";
 import { renderMarkdownSafe } from "@/lib/utils/markdown";
 import StarButton from "@/components/plugins/StarButton";
 import CommentsThread from "@/components/comments/CommentsThread";
+import InstallationCode from "@/components/plugins/InstallationCode";
 import { pocketbaseFileUrl } from "@/lib/utils/fileUrl";
 
 const { slug } = Astro.params;
@@ -23,19 +24,64 @@ const readmeHtml = renderMarkdownSafe(String(plugin?.readme || ""));
 const iconUrl = plugin?.icon ? pocketbaseFileUrl("plugins", String(plugin?.id || ""), String(plugin.icon), { thumb: "100x100" }) : "";
 const screenshots = Array.isArray(plugin?.screenshots) ? plugin.screenshots : [];
 
+// Get latest version for schema
+const latestVersion = Array.isArray(plugin?.versions) && plugin.versions.length > 0
+  ? plugin.versions[0].version
+  : undefined;
+
+// Extract unique PocketBase versions from all versions
+const pocketbaseVersions = Array.isArray(plugin?.versions)
+  ? [...new Set(plugin.versions.map((v: any) => v.pocketbase_version).filter(Boolean))]
+  : [];
+
+// Get author info from repository or fallback
+let authorName = plugin?.author || "PocketBase Community";
+let authorType = "Organization";
+if (plugin?.repository) {
+  try {
+    const repoUrl = new URL(plugin.repository);
+    if (repoUrl.hostname === "github.com") {
+      const repoPath = repoUrl.pathname.split("/").filter(Boolean);
+      if (repoPath.length > 0) {
+        authorName = repoPath[0];
+        authorType = "Organization";
+      }
+    }
+  } catch {}
+}
+
+// Calculate aggregateRating based on stars and github_stars
+const totalStars = (plugin?.stats?.stars || 0) + (plugin?.github_stars || 0);
+const ratingCount = Math.max(1, Math.floor(totalStars / 10) || 1);
+const normalizedRating = totalStars > 0
+  ? Math.min(5, Math.max(3.5, 3.5 + Math.log10(totalStars + 1)))
+  : undefined;
+
 // SoftwareSourceCode schema data
 const pluginSchemaData = {
   name: plugin?.name,
   description: plugin?.description,
-  authorName: plugin?.author || "PocketBase Community",
-  authorType: "Organization",
+  authorName,
+  authorType,
   language: plugin?.language || "JavaScript",
   repository: plugin?.repository,
-  aggregateRating: plugin?.stats?.stars ? {
-    value: Math.min(5, (plugin?.stats?.stars || 0) / 10 + 3.5),
-    count: plugin?.stats?.stars || 0
+  version: latestVersion,
+  codeRepository: plugin?.repository,
+  aggregateRating: normalizedRating ? {
+    value: normalizedRating.toFixed(1),
+    count: ratingCount
   } : undefined
 };
+
+Astro.response.headers.set(
+  "Cache-Control",
+  "public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+);
+
+// Log schema data for validation in dev mode
+if (import.meta.env.DEV) {
+  console.log("[Plugin Schema]", JSON.stringify(pluginSchemaData, null, 2));
+}
 ---
 
 <BaseLayout
@@ -129,6 +175,7 @@ const pluginSchemaData = {
           <thead class="bg-neutral-50 text-left dark:bg-neutral-900">
             <tr>
               <th class="px-4 py-2">Version</th>
+              <th class="px-4 py-2">PocketBase</th>
               <th class="px-4 py-2">Downloads</th>
               <th class="px-4 py-2">Link</th>
             </tr>
@@ -136,7 +183,18 @@ const pluginSchemaData = {
           <tbody>
             {plugin.versions.map((v) => (
               <tr class="border-t border-neutral-200 dark:border-neutral-800">
-                <td class="px-4 py-2">{v.version}</td>
+                <td class="px-4 py-2">
+                  <span class="font-medium">{v.version}</span>
+                </td>
+                <td class="px-4 py-2">
+                  {v.pocketbase_version ? (
+                    <span class="rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                      PB {v.pocketbase_version}
+                    </span>
+                  ) : (
+                    <span class="text-neutral-400">-</span>
+                  )}
+                </td>
                 <td class="px-4 py-2">{v.downloads ?? 0}</td>
                 <td class="px-4 py-2">
                   <a
@@ -158,5 +216,16 @@ const pluginSchemaData = {
 
   <section class="mt-10">
     <CommentsThread pluginSlug={String(slug)} client:load />
+  </section>
+
+  <section class="mt-10 rounded-xl border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-950">
+    <h2 class="text-lg font-semibold">安装指南</h2>
+    <InstallationCode
+      pluginName={String(plugin?.name || slug)}
+      pluginSlug={String(slug)}
+      latestVersion={latestVersion}
+      pocketbaseVersions={pocketbaseVersions}
+      client:load
+    />
   </section>
 </BaseLayout>

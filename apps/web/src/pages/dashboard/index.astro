@@ -3,7 +3,7 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
 import DashboardPanel from "@/components/dashboard/DashboardPanel";
 ---
 
-<BaseLayout title="我的面板 - PocketBase.cn" description="管理你的提交内容与账户信息。">
+<BaseLayout title="我的面板 - PocketBase.cn" description="管理你的提交内容与账户信息。" noindex={true}>
   <h1 class="text-2xl font-semibold tracking-tight">我的面板</h1>
   <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
     查看你提交的插件/案例的状态，并在必要时补充信息。
@@ -13,4 +13,3 @@ import DashboardPanel from "@/components/dashboard/DashboardPanel";
     <DashboardPanel client:load />
   </div>
 </BaseLayout>
-

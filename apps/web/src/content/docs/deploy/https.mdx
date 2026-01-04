@@ -1,0 +1,48 @@
+---
+title: HTTPS 配置
+description: 为 PocketBase 配置 HTTPS（Caddy 自动签发 / Nginx + Certbot）
+---
+
+生产环境必须启用 HTTPS。PocketBase 本身不负责证书管理，推荐交给 Caddy 或 Nginx。
+
+## 方案一：Caddy（推荐）
+
+Caddy 会自动申请并续期证书（Let’s Encrypt）。
+
+```txt
+api.example.com {
+  reverse_proxy 127.0.0.1:8090
+}
+```
+
+重载配置：
+
+```bash
+sudo systemctl reload caddy
+```
+
+## 方案二：Nginx + Certbot
+
+1. 先配置 HTTP 站点（用于 ACME 验证），并确保 `api.example.com` 指向你的服务器。
+
+2. 申请证书：
+
+```bash
+sudo apt update
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d api.example.com
+```
+
+3. 确认自动续期：
+
+```bash
+sudo systemctl status certbot.timer
+sudo certbot renew --dry-run
+```
+
+## Cloudflare 场景提醒
+
+如果使用 Cloudflare 代理（橙色云）：
+
+- SSL/TLS 模式用 **Full (Strict)**
+- Origin 也需要有效证书（Caddy/Certbot 都可）

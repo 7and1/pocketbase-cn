@@ -2,6 +2,8 @@ export type ShowcaseStatus = "pending" | "approved" | "rejected" | "hidden";
 
 export interface ShowcaseItem {
   id: string;
+  collectionId?: string;
+  collectionName?: string;
   slug: string;
   title: string;
   description: string;
@@ -16,4 +18,6 @@ export interface ShowcaseItem {
   thumbnail?: string;
   screenshots?: string[];
   status?: ShowcaseStatus;
+  created?: string;
+  updated?: string;
 }

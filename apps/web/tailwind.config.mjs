@@ -23,6 +23,23 @@ export default {
           950: "#1e1b4b",
         },
       },
+      // Mobile touch target optimizations
+      minWidth: {
+        touch: "44px",
+      },
+      minHeight: {
+        touch: "44px",
+      },
+      // Animation for shimmer effect
+      keyframes: {
+        shimmer: {
+          "0%": { backgroundPosition: "200% 0" },
+          "100%": { backgroundPosition: "-200% 0" },
+        },
+      },
+      animation: {
+        shimmer: "shimmer 1.5s ease-in-out infinite",
+      },
     },
   },
   plugins: [typography, forms, aspectRatio],

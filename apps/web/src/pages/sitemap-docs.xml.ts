@@ -1,6 +1,15 @@
 import { getCollection } from "astro:content";
 import { SITE_URL } from "@/lib/constants/config";
 
+function routeForId(id: string) {
+  const normalized = String(id || "").replace(/^\/+|\/+$/g, "");
+  if (!normalized) return "/";
+  if (normalized.endsWith("/index"))
+    return `/${normalized.slice(0, -"/index".length)}/`;
+  if (normalized === "index") return "/";
+  return `/${normalized}/`;
+}
+
 export async function GET() {
   const docs = await getCollection("docs");
   const now = new Date().toISOString();
@@ -11,7 +20,7 @@ export async function GET() {
 ${docs
   .map(
     (doc) => `  <url>
-    <loc>${SITE_URL}/docs${doc.id === "index" ? "" : "/" + doc.id}</loc>
+    <loc>${SITE_URL}${routeForId(doc.id)}</loc>
     <lastmod>${now}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>

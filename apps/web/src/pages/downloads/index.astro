@@ -1,8 +1,10 @@
 ---
+export const prerender = false;
+
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import DownloadsBrowser from "@/components/downloads/DownloadsBrowser";
 import NewsletterForm from "@/components/newsletter/NewsletterForm";
-import { SITE_URL } from "@/lib/constants/config";
+import { POCKETBASE_URL, SITE_URL } from "@/lib/constants/config";
 
 const pocketBaseDownloadUrl = "https://github.com/pocketbase/pocketbase/releases";
 
@@ -11,6 +13,51 @@ const downloadsDescription = "下载 PocketBase 最新版本，支持 Windows、
 const softwareAppSchemaData = {
   downloadUrl: pocketBaseDownloadUrl
 };
+
+const versionParam = (Astro.url.searchParams.get("version") || "").trim();
+
+let versions: string[] = [];
+let version = "";
+let files: unknown[] = [];
+
+try {
+  const res = await fetch(new URL("/api/downloads/versions", POCKETBASE_URL).toString(), {
+    headers: { Accept: "application/json" },
+  });
+  if (res.ok) {
+    const json = await res.json();
+    versions = Array.isArray(json?.data) ? (json.data as string[]) : [];
+  }
+} catch {
+  versions = [];
+}
+
+if (versionParam && versions.includes(versionParam)) version = versionParam;
+else version = versions[0] || "";
+
+if (version) {
+  try {
+    const u = new URL("/api/downloads/files", POCKETBASE_URL);
+    u.searchParams.set("version", version);
+    const res2 = await fetch(u.toString(), { headers: { Accept: "application/json" } });
+    if (res2.ok) {
+      const json2 = await res2.json();
+      files = Array.isArray(json2?.data) ? json2.data : [];
+    }
+  } catch {
+    files = [];
+  }
+}
+
+const canonical = new URL("/downloads/", SITE_URL).toString();
+const hasFilters = Boolean(versionParam);
+
+Astro.response.headers.set(
+  "Cache-Control",
+  hasFilters
+    ? "no-store"
+    : "public, max-age=120, s-maxage=600, stale-while-revalidate=1200",
+);
 ---
 
 <BaseLayout
@@ -18,6 +65,8 @@ const softwareAppSchemaData = {
   description={downloadsDescription}
   schemaType="SoftwareApplication"
   schemaData={softwareAppSchemaData}
+  canonical={canonical}
+  noindex={hasFilters}
 >
   <h1 class="text-2xl font-semibold tracking-tight">下载 PocketBase</h1>
   <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
@@ -92,7 +141,7 @@ const softwareAppSchemaData = {
   </section>
 
   <div class="mt-6">
-    <DownloadsBrowser client:load />
+    <DownloadsBrowser initial={{ versions, version, files }} client:visible />
   </div>
 
   <section class="mt-12 rounded-xl border border-neutral-200 p-6 dark:border-neutral-800">
@@ -101,8 +150,7 @@ const softwareAppSchemaData = {
       订阅后，当 PocketBase 发布新版本会发送邮件通知（需要确认订阅）。
     </p>
     <div class="mt-4 max-w-md">
-      <NewsletterForm client:load />
+      <NewsletterForm client:idle />
     </div>
   </section>
 </BaseLayout>
-

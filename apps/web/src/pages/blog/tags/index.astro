@@ -1,0 +1,52 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { getCollection } from "astro:content";
+import { SITE_URL } from "@/lib/constants/config";
+
+const allPosts = await getCollection("blog", ({ data }) => !data.draft);
+const counts = new Map<string, number>();
+for (const post of allPosts) {
+  for (const tag of post.data.tags || []) {
+    const key = String(tag || "").trim();
+    if (!key) continue;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+}
+
+const tags = Array.from(counts.entries())
+  .sort((a, b) => b[1] - a[1])
+  .map(([name, count]) => ({ name, count }));
+---
+
+<BaseLayout
+  title="博客标签 - PocketBase.cn"
+  description="按标签浏览 PocketBase.cn 的博客文章。"
+>
+  <Fragment slot="head">
+    <link
+      rel="alternate"
+      type="application/rss+xml"
+      title="PocketBase.cn 博客"
+      href={`${SITE_URL}/blog/rss.xml`}
+    />
+  </Fragment>
+
+  <div class="mx-auto max-w-3xl">
+    <h1 class="text-2xl font-semibold tracking-tight">博客标签</h1>
+    <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+      按标签浏览 PocketBase 相关文章与最佳实践。
+    </p>
+
+    <div class="mt-6 flex flex-wrap gap-2">
+      {tags.map((tag) => (
+        <a
+          href={`/blog/tag/${encodeURIComponent(tag.name)}/`}
+          class="rounded-full border border-neutral-200 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50 dark:border-neutral-800 dark:text-neutral-200 dark:hover:bg-neutral-900"
+        >
+          #{tag.name} <span class="text-neutral-500 dark:text-neutral-400">({tag.count})</span>
+        </a>
+      ))}
+    </div>
+  </div>
+</BaseLayout>
+

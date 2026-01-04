@@ -9,16 +9,27 @@ const {
   title = "PocketBase.cn",
   description = "PocketBase 中文文档、插件市场、案例展示与下载镜像",
   noindex = false,
+  canonical: canonicalOverride,
+  ogImage: ogImageOverride,
+  ogType = "website",
   schemaType = "WebPage",
   schemaData = {}
 } = Astro.props;
 
 const currentPath = Astro.url.pathname.replace(/\/+$/g, "") || "/";
-const canonical = new URL(currentPath === "/" ? "/" : `${currentPath}/`, SITE_URL).toString();
-const ogImage = new URL("/og-image.png", SITE_URL).toString();
+const canonical = (canonicalOverride && String(canonicalOverride)) ? String(canonicalOverride) : new URL(currentPath === "/" ? "/" : `${currentPath}/`, SITE_URL).toString();
+const ogImage = (ogImageOverride && String(ogImageOverride)) ? String(ogImageOverride) : new URL("/og-image.png", SITE_URL).toString();
 const gaId = import.meta.env.PUBLIC_GA_ID || "";
 const umamiSrc = import.meta.env.PUBLIC_UMAMI_SRC || "";
 const umamiWebsiteId = import.meta.env.PUBLIC_UMAMI_WEBSITE_ID || "";
+const baiduVerification = import.meta.env.PUBLIC_BAIDU_SITE_VERIFICATION || "";
+
+let apiOrigin = "";
+try {
+  apiOrigin = new URL(POCKETBASE_URL).origin;
+} catch (_) {
+  apiOrigin = "";
+}
 
 // Detect page type and generate schema
 function detectPageType(pathname: string): string {
@@ -35,15 +46,32 @@ function detectPageType(pathname: string): string {
 // Generate breadcrumb list schema
 function generateBreadcrumbList(pathname: string, siteUrl: string) {
   const segments = pathname.split("/").filter(Boolean);
-  const breadcrumbs = [{ name: "Home", item: siteUrl }];
+  const breadcrumbs = [{ name: "首页", item: siteUrl }];
+
+  const nameMap: Record<string, string> = {
+    docs: "文档",
+    plugins: "插件",
+    showcase: "案例",
+    downloads: "下载",
+    blog: "博客",
+    legal: "法律",
+    profile: "个人资料",
+    dashboard: "面板",
+    admin: "管理",
+    auth: "认证",
+    newsletter: "Newsletter",
+  };
 
   let buildPath = "";
   for (const segment of segments) {
     buildPath += `/${segment}`;
-    const name = segment
-      .split("-")
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" ");
+    const mapped = nameMap[segment];
+    const name = mapped
+      ? mapped
+      : segment
+          .split("-")
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(" ");
     breadcrumbs.push({
       name,
       item: `${siteUrl}${buildPath}/`
@@ -104,7 +132,8 @@ function generateSchema(pageType: string, additionalData: Record<string, any> = 
         },
         programmingLanguage: additionalData.language || "JavaScript",
         runtimePlatform: "PocketBase",
-        codeRepository: additionalData.repository,
+        codeRepository: additionalData.codeRepository || additionalData.repository,
+        ...(additionalData.version && { version: additionalData.version }),
         offers: {
           "@type": "Offer",
           price: "0",
@@ -132,8 +161,12 @@ function generateSchema(pageType: string, additionalData: Record<string, any> = 
           name: additionalData.authorName || "PocketBase Community"
         },
         url: additionalData.url,
-        keywords: additionalData.tags?.join(", ") || "",
-        genre: additionalData.category || "Web Application"
+        ...(additionalData.image && { image: additionalData.image }),
+        ...(additionalData.images && { image: additionalData.images }),
+        keywords: additionalData.keywords || additionalData.tags?.join(", ") || "",
+        ...(additionalData.techStack && { programmingLanguage: additionalData.techStack }),
+        genre: additionalData.category || "Web Application",
+        applicationCategory: additionalData.category || "Web Application"
       };
 
     case "downloads":
@@ -173,6 +206,11 @@ const breadcrumbSchema = generateBreadcrumbList(currentPath, SITE_URL);
 
 // Combine schemas
 const finalSchemas = [mainSchema, breadcrumbSchema];
+
+// Log schema data for validation in dev mode
+if (import.meta.env.DEV) {
+  console.log(`[Schema ${pageType}]`, JSON.stringify(finalSchemas, null, 2));
+}
 ---
 
 <!doctype html>
@@ -199,10 +237,10 @@ const finalSchemas = [mainSchema, breadcrumbSchema];
     <link rel="canonical" href={canonical} />
     <meta name="robots" content={noindex ? "noindex, nofollow" : "index, follow, max-image-preview:large"} />
     <meta name="author" content="PocketBase.cn" />
-    <meta name="baidu-site-verification" content="codeva-xxx" />
+    {baiduVerification ? <meta name="baidu-site-verification" content={baiduVerification} /> : null}
     <meta name="theme-color" content="#3366ff" />
 
-    <meta property="og:type" content="website" />
+    <meta property="og:type" content={ogType} />
     <meta property="og:site_name" content="PocketBase.cn" />
     <meta property="og:locale" content="zh_CN" />
     <meta property="og:title" content={title} />
@@ -221,9 +259,23 @@ const finalSchemas = [mainSchema, breadcrumbSchema];
     <link rel="icon" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/favicon.svg" />
 
+    <slot name="head" />
+
     <!-- Preconnect to API origin for faster resource loading -->
-    <link rel="preconnect" href={new URL(POCKETBASE_URL).origin} />
-    <link rel="dns-prefetch" href={new URL(POCKETBASE_URL).origin} />
+    {apiOrigin ? (
+      <Fragment>
+        <link rel="preconnect" href={apiOrigin} />
+        <link rel="dns-prefetch" href={apiOrigin} />
+      </Fragment>
+    ) : null}
+
+    <!-- Preconnect to image domains -->
+    <link rel="preconnect" href="https://picsum.photos" crossorigin />
+
+    <!-- Prefetch critical resources for navigation -->
+    <link rel="prefetch" href="/plugins/" />
+    <link rel="prefetch" href="/showcase/" />
+    <link rel="prefetch" href="/downloads/" />
 
     <!-- Register Service Worker -->
     <script is:inline>
@@ -240,6 +292,29 @@ const finalSchemas = [mainSchema, breadcrumbSchema];
     {finalSchemas.map((schema) => (
       <script type="application/ld+json" is:inline set:html={JSON.stringify(schema)} />
     ))}
+
+    <!-- Schema validation in dev mode -->
+    {import.meta.env.DEV ? (
+      <script is:inline>
+        document.addEventListener('DOMContentLoaded', function() {
+          const schemas = document.querySelectorAll('script[type="application/ld+json"]');
+          console.group('[Schema.org Validation]');
+          console.log('Found ' + schemas.length + ' JSON-LD schema(s)');
+          schemas.forEach((script, index) => {
+            try {
+              const schema = JSON.parse(script.textContent);
+              console.log('Schema ' + (index + 1) + ' (' + schema['@type'] + '):', schema);
+            } catch (e) {
+              console.error('Schema ' + (index + 1) + ' parse error:', e);
+            }
+          });
+          console.groupEnd();
+
+          // Validate against Google's Rich Results Test URL
+          console.log('Validate at: https://search.google.com/test/rich-results');
+        });
+      </script>
+    ) : null}
 
     {gaId ? (
       <Fragment>
@@ -273,6 +348,6 @@ gtag('config', '${gaId}', { anonymize_ip: true });`}
       <slot />
     </main>
     <Footer />
-    <CookieConsent client:load />
+    <CookieConsent client:idle />
   </body>
 </html>

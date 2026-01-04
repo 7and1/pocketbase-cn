@@ -1,21 +1,57 @@
+// ETag generation for HTTP caching
+function _pbcnGenerateETag(data) {
+  try {
+    var json = JSON.stringify(data || {});
+    if ($security && $security.hs256) {
+      return $security.hs256(json, "pbcn-etag-v1");
+    }
+    var hash = 0;
+    for (var i = 0; i < json.length; i++) {
+      var ch = json.charCodeAt(i);
+      hash = (hash << 5) - hash + ch;
+      hash = hash & hash;
+    }
+    return "h-" + Math.abs(hash).toString(36);
+  } catch (_) {
+    return Date.now().toString(36);
+  }
+}
+
+function _pbcnCheckETag(c, etag) {
+  try {
+    var ifNoneMatch = "";
+    if (c.request && c.request.header) {
+      ifNoneMatch = c.request.header.get("If-None-Match") || "";
+    }
+    if (ifNoneMatch && ifNoneMatch === etag) {
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+function _pbcnSetCacheHeaders(c, etag, cacheControl) {
+  try {
+    if (c && c.response && c.response.header) {
+      var h = c.response.header();
+      if (etag) h.set("ETag", etag);
+      h.set("Cache-Control", cacheControl);
+      h.set("Vary", "Accept, Accept-Encoding");
+      return;
+    }
+  } catch (_) {}
+  try {
+    if (c && c.response && c.response().header) {
+      var h2 = c.response().header();
+      if (etag) h2.set("ETag", etag);
+      h2.set("Cache-Control", cacheControl);
+      h2.set("Vary", "Accept, Accept-Encoding");
+    }
+  } catch (_) {}
+}
+
 routerAdd("GET", "/api/showcase/featured", function (c) {
   var pbcn = require(__hooks + "/lib/pbcn.js");
-
-  function voteCount(showcaseId) {
-    try {
-      var rows = $app.findRecordsByFilter(
-        "showcase_votes",
-        "showcase = {:id}",
-        "",
-        0,
-        0,
-        { id: showcaseId },
-      );
-      return (rows || []).length;
-    } catch (_) {
-      return 0;
-    }
-  }
 
   var items = $app.findRecordsByFilter(
     "showcase",
@@ -25,9 +61,16 @@ routerAdd("GET", "/api/showcase/featured", function (c) {
     0,
   );
 
-  var data = [];
+  // Batch load votes to avoid N+1 queries
+  var showcaseIds = [];
   for (var i = 0; i < (items || []).length; i++) {
-    var s = items[i];
+    showcaseIds.push(items[i].id);
+  }
+  var votesMap = pbcn.batchLoadShowcaseVotes(showcaseIds);
+
+  var data = [];
+  for (var j = 0; j < (items || []).length; j++) {
+    var s = items[j];
     data.push({
       id: s.id,
       title: s.get("title"),
@@ -41,31 +84,29 @@ routerAdd("GET", "/api/showcase/featured", function (c) {
       thumbnail: s.get("thumbnail") || "",
       screenshots: s.get("screenshots") || [],
       views: s.get("views") || 0,
-      votes: voteCount(s.id),
+      votes: votesMap[s.id] || 0,
+      updated: s.get("updated") || null,
     });
   }
 
-  return c.json(200, { data: data, meta: { total: data.length } });
+  var response = { data: data, meta: { total: data.length } };
+  var etag = _pbcnGenerateETag(response);
+
+  if (_pbcnCheckETag(c, etag)) {
+    return c.noContent(304);
+  }
+
+  _pbcnSetCacheHeaders(
+    c,
+    etag,
+    "public, max-age=300, s-maxage=600, stale-while-revalidate=30",
+  );
+
+  return c.json(200, response);
 });
 
 routerAdd("GET", "/api/showcase/list", function (c) {
   var pbcn = require(__hooks + "/lib/pbcn.js");
-
-  function voteCount(showcaseId) {
-    try {
-      var rows = $app.findRecordsByFilter(
-        "showcase_votes",
-        "showcase = {:id}",
-        "",
-        0,
-        0,
-        { id: showcaseId },
-      );
-      return (rows || []).length;
-    } catch (_) {
-      return 0;
-    }
-  }
 
   var info = c.requestInfo() || {};
   var q = info.query && info.query.q ? String(info.query.q) : "";
@@ -123,6 +164,13 @@ routerAdd("GET", "/api/showcase/list", function (c) {
     items = items.slice(0, limit);
   }
 
+  // Batch load votes to avoid N+1 queries
+  var showcaseIds = [];
+  for (var x = 0; x < (items || []).length; x++) {
+    showcaseIds.push(items[x].id);
+  }
+  var votesMap = pbcn.batchLoadShowcaseVotes(showcaseIds);
+
   var data = [];
   for (var i = 0; i < (items || []).length; i++) {
     var s = items[i];
@@ -139,11 +187,12 @@ routerAdd("GET", "/api/showcase/list", function (c) {
       thumbnail: s.get("thumbnail") || "",
       screenshots: s.get("screenshots") || [],
       views: s.get("views") || 0,
-      votes: voteCount(s.id),
+      votes: votesMap[s.id] || 0,
+      updated: s.get("updated") || null,
     });
   }
 
-  return c.json(200, {
+  var response = {
     data: data,
     meta: {
       offset: offset,
@@ -151,27 +200,27 @@ routerAdd("GET", "/api/showcase/list", function (c) {
       hasMore: hasMore,
       nextOffset: offset + data.length,
     },
-  });
+  };
+
+  // Use shorter cache for search results, longer for filtered lists
+  var cacheAge = q ? 30 : 60;
+  var etag = _pbcnGenerateETag(response);
+
+  if (_pbcnCheckETag(c, etag)) {
+    return c.noContent(304);
+  }
+
+  _pbcnSetCacheHeaders(
+    c,
+    etag,
+    "public, max-age=" + cacheAge + ", s-maxage=120, stale-while-revalidate=10",
+  );
+
+  return c.json(200, response);
 });
 
 routerAdd("GET", "/api/showcase/{slug}", function (c) {
   var pbcn = require(__hooks + "/lib/pbcn.js");
-
-  function voteCount(showcaseId) {
-    try {
-      var rows = $app.findRecordsByFilter(
-        "showcase_votes",
-        "showcase = {:id}",
-        "",
-        0,
-        0,
-        { id: showcaseId },
-      );
-      return (rows || []).length;
-    } catch (_) {
-      return 0;
-    }
-  }
 
   var slug = "";
   try {
@@ -202,7 +251,21 @@ routerAdd("GET", "/api/showcase/{slug}", function (c) {
     $app.save(s);
   } catch (_) {}
 
-  return c.json(200, {
+  // Get vote count (single query for detail view)
+  var votes = 0;
+  try {
+    var voteRows = $app.findRecordsByFilter(
+      "showcase_votes",
+      "showcase = {:id}",
+      "",
+      0,
+      0,
+      { id: s.id },
+    );
+    votes = (voteRows || []).length;
+  } catch (_) {}
+
+  var response = {
     data: {
       id: s.id,
       title: s.get("title"),
@@ -217,9 +280,19 @@ routerAdd("GET", "/api/showcase/{slug}", function (c) {
       thumbnail: s.get("thumbnail") || "",
       screenshots: s.get("screenshots") || [],
       views: s.get("views") || 0,
-      votes: voteCount(s.id),
+      votes: votes,
+      updated: s.get("updated") || null,
     },
-  });
+  };
+
+  // Detail view gets shorter cache due to view increment
+  _pbcnSetCacheHeaders(
+    c,
+    null,
+    "public, max-age=60, s-maxage=120, stale-while-revalidate=15",
+  );
+
+  return c.json(200, response);
 });
 
 routerAdd(
@@ -258,7 +331,8 @@ routerAdd(
       });
     }
 
-    function voteCount(showcaseId) {
+    // Get vote count after toggle (single query)
+    var getVoteCount = function (sid) {
       try {
         var rows = $app.findRecordsByFilter(
           "showcase_votes",
@@ -266,13 +340,13 @@ routerAdd(
           "",
           0,
           0,
-          { id: showcaseId },
+          { id: sid },
         );
         return (rows || []).length;
       } catch (_) {
         return 0;
       }
-    }
+    };
 
     try {
       var existing = $app.findFirstRecordByFilter(
@@ -282,7 +356,7 @@ routerAdd(
       );
       $app.delete(existing);
       return c.json(200, {
-        data: { voted: false, votes: voteCount(showcase.id) },
+        data: { voted: false, votes: getVoteCount(showcase.id) },
       });
     } catch (_) {
       var col = $app.findCollectionByNameOrId("showcase_votes");
@@ -291,7 +365,7 @@ routerAdd(
       r.set("user", authRecord.id);
       $app.save(r);
       return c.json(200, {
-        data: { voted: true, votes: voteCount(showcase.id) },
+        data: { voted: true, votes: getVoteCount(showcase.id) },
       });
     }
   },

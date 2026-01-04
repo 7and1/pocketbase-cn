@@ -1,0 +1,60 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import BlogArchive from "@/components/blog/BlogArchive.astro";
+import { getCollection } from "astro:content";
+import { POSTS_PER_PAGE } from "@/lib/constants/blog";
+import { SITE_URL } from "@/lib/constants/config";
+
+export async function getStaticPaths() {
+  const allPosts = await getCollection("blog", ({ data }) => !data.draft);
+  const totalPages = Math.ceil(allPosts.length / POSTS_PER_PAGE);
+  const pages = Array.from({ length: Math.max(0, totalPages - 1) }, (_, i) => i + 2);
+  return pages.map((page) => ({ params: { page: String(page) } }));
+}
+
+const { page } = Astro.params;
+const currentPage = Math.max(2, parseInt(page || "2", 10));
+
+const allPosts = await getCollection("blog", ({ data }) => !data.draft);
+const sortedPosts = allPosts.sort((a, b) =>
+  b.data.publishDate.valueOf() - a.data.publishDate.valueOf(),
+);
+
+const totalPages = Math.ceil(sortedPosts.length / POSTS_PER_PAGE) || 1;
+const safePage = Math.min(currentPage, totalPages);
+
+const startIndex = (safePage - 1) * POSTS_PER_PAGE;
+const endIndex = startIndex + POSTS_PER_PAGE;
+const posts = sortedPosts.slice(startIndex, endIndex);
+
+const categories = [...new Set(allPosts.map((p) => p.data.category))];
+const tags = [...new Set(allPosts.flatMap((p) => p.data.tags))];
+
+const urlForPage = (pageNum: number) => (pageNum <= 1 ? "/blog/" : `/blog/page/${pageNum}/`);
+---
+
+<BaseLayout
+  title={`博客 - 第 ${safePage} 页 - PocketBase.cn`}
+  description="PocketBase 技术文章、教程、最佳实践与对比分析。"
+>
+  <Fragment slot="head">
+    <link
+      rel="alternate"
+      type="application/rss+xml"
+      title="PocketBase.cn 博客"
+      href={`${SITE_URL}/blog/rss.xml`}
+    />
+  </Fragment>
+
+  <BlogArchive
+    heading={`博客 - 第 ${safePage} 页`}
+    intro="技术文章、教程、最佳实践与对比分析"
+    posts={posts}
+    categories={categories}
+    tags={tags}
+    currentPage={safePage}
+    totalPages={totalPages}
+    urlForPage={urlForPage}
+  />
+</BaseLayout>
+

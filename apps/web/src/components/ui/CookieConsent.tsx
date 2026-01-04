@@ -29,8 +29,9 @@ export default function CookieConsent() {
     setVisible(false);
     // Disable analytics if already loaded
     if (typeof window !== "undefined") {
-      (window as { [key: string]: unknown })["ga-disable-GA_MEASUREMENT_ID"] =
-        true;
+      (window as unknown as { [key: string]: unknown })[
+        "ga-disable-GA_MEASUREMENT_ID"
+      ] = true;
     }
   };
 

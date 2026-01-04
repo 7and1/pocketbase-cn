@@ -22,7 +22,10 @@ export function Skeleton({
   return (
     <div
       className={cn(
-        "animate-pulse bg-neutral-200 dark:bg-neutral-800",
+        "animate-shimmer bg-neutral-200 dark:bg-neutral-800",
+        "bg-[length:200%_100%]",
+        "bg-gradient-to-r from-neutral-200 via-neutral-100 to-neutral-200",
+        "dark:from-neutral-800 dark:via-neutral-700 dark:to-neutral-800",
         variantStyles[variant],
         className,
       )}
@@ -42,7 +45,7 @@ export function CardSkeleton({
   lines = 3,
 }: CardSkeletonProps) {
   return (
-    <div className="rounded-xl border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-950">
+    <div className="rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950 sm:p-5">
       {showAvatar && (
         <div className="mb-3 flex items-center gap-3">
           <Skeleton variant="circular" width={32} height={32} />
@@ -71,7 +74,7 @@ export function GridSkeleton({
   showAvatar = true,
 }: GridSkeletonProps) {
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-3 sm:gap-4 md:grid-cols-2 lg:grid-cols-3">
       {Array.from({ length: count }).map((_, i) => (
         <CardSkeleton key={i} showAvatar={showAvatar} />
       ))}
@@ -86,23 +89,49 @@ interface TableSkeletonProps {
 
 export function TableSkeleton({ rows = 5, columns = 4 }: TableSkeletonProps) {
   return (
-    <div className="overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-800">
-      <div className="bg-neutral-50 p-4 dark:bg-neutral-900">
-        <div className="flex gap-4">
-          {Array.from({ length: columns }).map((_, i) => (
-            <Skeleton key={i} variant="text" width={80} />
+    <>
+      {/* Desktop Table Skeleton */}
+      <div className="hidden overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-800 md:block">
+        <div className="bg-neutral-50 p-4 dark:bg-neutral-900">
+          <div className="flex gap-4">
+            {Array.from({ length: columns }).map((_, i) => (
+              <Skeleton key={i} variant="text" width={80} />
+            ))}
+          </div>
+        </div>
+        <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
+          {Array.from({ length: rows }).map((_, i) => (
+            <div key={i} className="flex gap-4 p-4">
+              {Array.from({ length: columns }).map((_, j) => (
+                <Skeleton key={j} variant="text" width={60 + j * 20} />
+              ))}
+            </div>
           ))}
         </div>
       </div>
-      <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
-        {Array.from({ length: rows }).map((_, i) => (
-          <div key={i} className="flex gap-4 p-4">
-            {Array.from({ length: columns }).map((_, j) => (
-              <Skeleton key={j} variant="text" width={60 + j * 20} />
-            ))}
+
+      {/* Mobile Card Skeleton */}
+      <div className="space-y-3 md:hidden">
+        {Array.from({ length: Math.min(rows, 3) }).map((_, i) => (
+          <div
+            key={i}
+            className="overflow-hidden rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-950"
+          >
+            <div className="border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
+              <Skeleton variant="text" width={120} />
+              <Skeleton variant="text" className="mt-2" width={80} />
+            </div>
+            <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
+              {Array.from({ length: Math.min(columns - 1, 2) }).map((_, j) => (
+                <div key={j} className="flex justify-between px-4 py-3">
+                  <Skeleton variant="text" width={60} />
+                  <Skeleton variant="text" width={80} />
+                </div>
+              ))}
+            </div>
           </div>
         ))}
       </div>
-    </div>
+    </>
   );
 }

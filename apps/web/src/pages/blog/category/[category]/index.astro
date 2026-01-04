@@ -1,0 +1,60 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import BlogArchive from "@/components/blog/BlogArchive.astro";
+import { getCollection } from "astro:content";
+import { POSTS_PER_PAGE } from "@/lib/constants/blog";
+import { SITE_URL } from "@/lib/constants/config";
+
+export async function getStaticPaths() {
+  const allPosts = await getCollection("blog", ({ data }) => !data.draft);
+  const categories = [...new Set(allPosts.map((p) => String(p.data.category || "未分类")))];
+  return categories.map((category) => ({ params: { category } }));
+}
+
+const { category } = Astro.params;
+const selectedCategory = String(category || "").trim();
+if (!selectedCategory) return Astro.redirect("/blog/");
+
+const allPosts = await getCollection("blog", ({ data }) => !data.draft);
+const filtered = allPosts
+  .filter((p) => String(p.data.category || "未分类") === selectedCategory)
+  .sort((a, b) => b.data.publishDate.valueOf() - a.data.publishDate.valueOf());
+
+const totalPages = Math.ceil(filtered.length / POSTS_PER_PAGE) || 1;
+const posts = filtered.slice(0, POSTS_PER_PAGE);
+
+const categories = [...new Set(allPosts.map((p) => String(p.data.category || "未分类")))];
+const tags = [...new Set(allPosts.flatMap((p) => p.data.tags))];
+
+const urlForPage = (pageNum: number) =>
+  pageNum <= 1
+    ? `/blog/category/${encodeURIComponent(selectedCategory)}/`
+    : `/blog/category/${encodeURIComponent(selectedCategory)}/page/${pageNum}/`;
+---
+
+<BaseLayout
+  title={`${selectedCategory} - 博客分类 - PocketBase.cn`}
+  description={`浏览 PocketBase.cn 博客分类「${selectedCategory}」的文章与教程。`}
+>
+  <Fragment slot="head">
+    <link
+      rel="alternate"
+      type="application/rss+xml"
+      title="PocketBase.cn 博客"
+      href={`${SITE_URL}/blog/rss.xml`}
+    />
+  </Fragment>
+
+  <BlogArchive
+    heading={`分类：${selectedCategory}`}
+    intro={`共 ${filtered.length} 篇文章`}
+    posts={posts}
+    categories={categories}
+    tags={tags}
+    selectedCategory={selectedCategory}
+    currentPage={1}
+    totalPages={totalPages}
+    urlForPage={urlForPage}
+  />
+</BaseLayout>
+

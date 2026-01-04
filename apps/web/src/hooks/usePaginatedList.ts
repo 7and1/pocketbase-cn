@@ -1,10 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { POCKETBASE_URL } from "@/lib/constants/config";
+import { fetchPaginated, type ApiResponse } from "@/lib/utils/api";
+import { getErrorMessage } from "@/lib/errors/AppError";
 
-interface UsePaginatedListOptions {
-  endpoint: string;
-  limit?: number;
+export interface PaginatedMeta {
+  hasMore?: boolean;
+  nextOffset?: number;
+}
+
+export interface InitialPaginatedData<T> {
+  endpointUrl: string;
+  items: T[];
+  meta?: PaginatedMeta;
+}
+
+interface UsePaginatedListOptions<T> {
+  endpointUrl: string;
   rootMargin?: string;
+  initial?: InitialPaginatedData<T>;
 }
 
 interface PaginatedListResult<T> {
@@ -18,24 +31,33 @@ interface PaginatedListResult<T> {
 }
 
 export function usePaginatedList<T>({
-  endpoint,
-  limit = 24,
+  endpointUrl,
   rootMargin = "400px",
-}: UsePaginatedListOptions): PaginatedListResult<T> {
+  initial,
+}: UsePaginatedListOptions<T>): PaginatedListResult<T> {
+  const initialMatches =
+    Boolean(initial?.endpointUrl) && initial?.endpointUrl === endpointUrl;
+  const initialAppliedRef = useRef(false);
+
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [items, setItems] = useState<T[]>([]);
-  const [offset, setOffset] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
+  const [items, setItems] = useState<T[]>(() =>
+    initialMatches ? (initial?.items as T[]) : [],
+  );
+  const [offset, setOffset] = useState(() => {
+    if (!initialMatches) return 0;
+    const next = Number(initial?.meta?.nextOffset);
+    if (Number.isFinite(next) && next >= 0) return next;
+    return Array.isArray(initial?.items) ? initial!.items.length : 0;
+  });
+  const [hasMore, setHasMore] = useState(() =>
+    initialMatches ? Boolean(initial?.meta?.hasMore) : false,
+  );
   const [trigger, setTrigger] = useState(0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  const endpointBase = useMemo(() => {
-    const url = new URL(endpoint, POCKETBASE_URL);
-    url.searchParams.set("limit", String(limit));
-    return url;
-  }, [endpoint, limit]);
+  const endpointBase = useMemo(() => new URL(endpointUrl), [endpointUrl]);
 
   async function loadPage(replace: boolean) {
     const nextOffset = replace ? 0 : offset;
@@ -46,20 +68,22 @@ export function usePaginatedList<T>({
     try {
       const url = new URL(endpointBase.toString());
       url.searchParams.set("offset", String(nextOffset));
-      const res = await fetch(url.toString(), {
-        headers: { Accept: "application/json" },
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      const rows = Array.isArray(json?.data) ? (json.data as T[]) : [];
-      const meta = json?.meta || {};
+      const result: ApiResponse<{ data: T[]; meta?: PaginatedMeta }> =
+        await fetchPaginated(url.toString());
+
+      if (result.error) {
+        setError(getErrorMessage(result.error));
+        return;
+      }
+
+      const rows = result.data?.data ?? [];
+      const meta = result.data?.meta ?? {};
 
       setItems((prev) => (replace ? rows : prev.concat(rows)));
       setHasMore(Boolean(meta?.hasMore));
-      setOffset(Number(meta?.nextOffset || nextOffset + rows.length));
+      setOffset(Number(meta?.nextOffset ?? nextOffset + rows.length));
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Load failed";
-      setError(message);
+      setError(getErrorMessage(e));
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -67,11 +91,34 @@ export function usePaginatedList<T>({
   }
 
   useEffect(() => {
+    const matchesNow =
+      Boolean(initial?.endpointUrl) && initial?.endpointUrl === endpointUrl;
+
+    if (matchesNow && !initialAppliedRef.current) {
+      initialAppliedRef.current = true;
+      setItems(Array.isArray(initial?.items) ? (initial!.items as T[]) : []);
+      setHasMore(Boolean(initial?.meta?.hasMore));
+      setOffset(
+        Number.isFinite(Number(initial?.meta?.nextOffset))
+          ? Number(initial?.meta?.nextOffset)
+          : Array.isArray(initial?.items)
+            ? initial!.items.length
+            : 0,
+      );
+      setError(null);
+      setLoading(false);
+      setLoadingMore(false);
+      return;
+    }
+
+    // When endpoint changes (filters), fetch fresh data.
+    initialAppliedRef.current = false;
     setItems([]);
     setOffset(0);
     setHasMore(false);
     loadPage(true);
-  }, [endpointBase.toString(), trigger]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endpointUrl, trigger]);
 
   useEffect(() => {
     const el = sentinelRef.current;
@@ -108,7 +155,10 @@ export function usePaginatedList<T>({
   };
 }
 
-interface UsePaginatedListWithFiltersOptions extends UsePaginatedListOptions {
+interface UsePaginatedListWithFiltersOptions {
+  endpoint: string;
+  limit?: number;
+  rootMargin?: string;
   defaultSort?: string;
   sortOptions?: { value: string; label: string }[];
 }
@@ -119,7 +169,12 @@ export function usePaginatedListWithFilters<T>({
   rootMargin = "400px",
   defaultSort = "-created",
   sortOptions = [],
-}: UsePaginatedListWithFiltersOptions) {
+  initialParams,
+  initial,
+}: UsePaginatedListWithFiltersOptions & {
+  initialParams?: { query: string; category: string; sort: string };
+  initial?: InitialPaginatedData<T>;
+}) {
   // Initialize from URL params
   const getInitialParams = () => {
     if (typeof window === "undefined")
@@ -132,10 +187,10 @@ export function usePaginatedListWithFilters<T>({
     };
   };
 
-  const initial = getInitialParams();
-  const [query, setQuery] = useState(initial.query);
-  const [category, setCategory] = useState(initial.category);
-  const [sort, setSort] = useState(initial.sort);
+  const initialState = initialParams || getInitialParams();
+  const [query, setQuery] = useState(initialState.query);
+  const [category, setCategory] = useState(initialState.category);
+  const [sort, setSort] = useState(initialState.sort);
 
   // Persist to URL
   useEffect(() => {
@@ -150,19 +205,20 @@ export function usePaginatedListWithFilters<T>({
     window.history.replaceState({}, "", newUrl);
   }, [query, category, sort, defaultSort]);
 
-  const endpointWithFilters = useMemo(() => {
+  const endpointUrl = useMemo(() => {
     const url = new URL(endpoint, POCKETBASE_URL);
     if (query.trim()) url.searchParams.set("q", query.trim());
     if (category.trim()) url.searchParams.set("category", category.trim());
     if (sort) url.searchParams.set("sort", sort);
     url.searchParams.set("limit", String(limit));
+    url.searchParams.set("offset", "0");
     return url.toString();
   }, [endpoint, query, category, sort, limit]);
 
   const listState = usePaginatedList<T>({
-    endpoint: endpointWithFilters,
-    limit,
+    endpointUrl,
     rootMargin,
+    initial,
   });
 
   return {

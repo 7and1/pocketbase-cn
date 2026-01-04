@@ -1,9 +1,61 @@
 ---
+export const prerender = false;
+
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import ShowcaseBrowser from "@/components/showcase/ShowcaseBrowser";
+import { POCKETBASE_URL, SITE_URL } from "@/lib/constants/config";
+
+const DEFAULT_SORT = "-featured,-created";
+const LIMIT = 24;
+
+const q = (Astro.url.searchParams.get("q") || "").trim();
+const category = (Astro.url.searchParams.get("category") || "").trim();
+const sort =
+  (Astro.url.searchParams.get("sort") || DEFAULT_SORT).trim() || DEFAULT_SORT;
+
+const endpointUrl = new URL("/api/showcase/list", POCKETBASE_URL);
+if (q) endpointUrl.searchParams.set("q", q);
+if (category) endpointUrl.searchParams.set("category", category);
+if (sort) endpointUrl.searchParams.set("sort", sort);
+endpointUrl.searchParams.set("limit", String(LIMIT));
+endpointUrl.searchParams.set("offset", "0");
+
+let initial = {
+  endpointUrl: endpointUrl.toString(),
+  items: [] as unknown[],
+  meta: {} as Record<string, unknown>,
+};
+
+try {
+  const res = await fetch(endpointUrl.toString(), {
+    headers: { Accept: "application/json" },
+  });
+  if (res.ok) {
+    const json = await res.json();
+    initial.items = Array.isArray(json?.data) ? json.data : [];
+    initial.meta = json?.meta && typeof json.meta === "object" ? json.meta : {};
+  }
+} catch {
+  // Best-effort SSR: fall back to client fetching.
+}
+
+const hasFilters = Boolean(q || category || sort !== DEFAULT_SORT);
+const canonical = new URL("/showcase/", SITE_URL).toString();
+
+Astro.response.headers.set(
+  "Cache-Control",
+  hasFilters
+    ? "no-store"
+    : "public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+);
 ---
 
-<BaseLayout title="PocketBase 案例展示 - 真实项目与成功故事" description="探索使用 PocketBase 构建的真实项目案例，包括 Web 应用、移动应用、SaaS 产品等。获取灵感，学习最佳实践。">
+<BaseLayout
+  title="PocketBase 案例展示 - 真实项目与成功故事"
+  description="探索使用 PocketBase 构建的真实项目案例，包括 Web 应用、移动应用、SaaS 产品等。获取灵感，学习最佳实践。"
+  canonical={canonical}
+  noindex={hasFilters}
+>
   <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
     <div>
       <h1 class="text-2xl font-semibold tracking-tight">PocketBase 案例展示</h1>
@@ -70,6 +122,25 @@ import ShowcaseBrowser from "@/components/showcase/ShowcaseBrowser";
   </section>
 
   <div class="mt-6">
-    <ShowcaseBrowser client:load />
+    <ShowcaseBrowser
+      initialParams={{ query: q, category, sort }}
+      initial={initial}
+      client:visible
+    />
   </div>
 </BaseLayout>
+
+<script>
+  // Prefetch next page on link hover for instant navigation
+  document.querySelectorAll('a[href^="/showcase/"]').forEach(link => {
+    link.addEventListener('mouseenter', () => {
+      const href = link.getAttribute('href');
+      if (href) {
+        const prefetchLink = document.createElement('link');
+        prefetchLink.rel = 'prefetch';
+        prefetchLink.href = href;
+        document.head.appendChild(prefetchLink);
+      }
+    }, { once: true });
+  });
+</script>

@@ -24,15 +24,34 @@ const contentHtml = sanitizeRichHtml(String(item?.content || ""));
 const thumbnailUrl = item?.thumbnail ? pocketbaseFileUrl("showcase", String(item?.id || ""), String(item.thumbnail), { thumb: "640x480" }) : "";
 const screenshots = Array.isArray(item?.screenshots) ? item.screenshots : [];
 
+// Build image array for schema (thumbnail + screenshots)
+const schemaImages = [thumbnailUrl, ...screenshots.map((f) =>
+  pocketbaseFileUrl("showcase", String(item?.id || ""), String(f))
+)].filter(Boolean);
+
 // CreativeWork schema data
 const showcaseSchemaData = {
   name: item?.title,
   description: item?.description,
   authorName: item?.submitter_name || "PocketBase Community",
   url: item?.url,
+  image: schemaImages.length > 0 ? schemaImages[0] : undefined,
+  images: schemaImages.length > 0 ? schemaImages : undefined,
   tags: item?.tags,
-  category: item?.category
+  category: item?.category,
+  techStack: Array.isArray(item?.tags) ? item.tags.join(", ") : undefined,
+  keywords: Array.isArray(item?.tags) ? item.tags.join(", ") : undefined
 };
+
+Astro.response.headers.set(
+  "Cache-Control",
+  "public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+);
+
+// Log schema data for validation in dev mode
+if (import.meta.env.DEV) {
+  console.log("[Showcase Schema]", JSON.stringify(showcaseSchemaData, null, 2));
+}
 ---
 
 <BaseLayout

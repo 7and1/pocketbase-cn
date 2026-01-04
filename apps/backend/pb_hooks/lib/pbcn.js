@@ -58,6 +58,45 @@ function ensurePluginStats(pluginId) {
   }
 }
 
+// Batch load showcase vote counts for multiple showcase IDs.
+// Returns a Map-like object keyed by showcaseId.
+function batchLoadShowcaseVotes(showcaseIds) {
+  var votesMap = {};
+  if (!showcaseIds || !showcaseIds.length) return votesMap;
+
+  var placeholders = [];
+  var params = {};
+  for (var i = 0; i < showcaseIds.length; i++) {
+    var key = "id" + i;
+    placeholders.push("{:" + key + "}");
+    params[key] = showcaseIds[i];
+  }
+
+  try {
+    var votes = $app.findRecordsByFilter(
+      "showcase_votes",
+      "showcase IN (" + placeholders.join(",") + ")",
+      "",
+      0,
+      0,
+      params,
+    );
+    for (var j = 0; j < (votes || []).length; j++) {
+      var v = votes[j];
+      var sid = v.get("showcase");
+      votesMap[sid] = (votesMap[sid] || 0) + 1;
+    }
+  } catch (_) {}
+
+  for (var k = 0; k < showcaseIds.length; k++) {
+    if (!votesMap[showcaseIds[k]]) {
+      votesMap[showcaseIds[k]] = 0;
+    }
+  }
+
+  return votesMap;
+}
+
 // Batch load plugin stats for multiple plugin IDs.
 // Returns a Map-like object keyed by pluginId.
 function batchLoadPluginStats(pluginIds) {
@@ -228,6 +267,7 @@ module.exports = {
   semverDesc: semverDesc,
   ensurePluginStats: ensurePluginStats,
   batchLoadPluginStats: batchLoadPluginStats,
+  batchLoadShowcaseVotes: batchLoadShowcaseVotes,
   parsePagination: parsePagination,
   authRole: authRole,
   hasRole: hasRole,

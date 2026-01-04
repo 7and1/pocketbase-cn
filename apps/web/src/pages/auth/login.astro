@@ -3,7 +3,11 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
 import LoginPanel from "@/components/auth/LoginPanel";
 ---
 
-<BaseLayout title="登录 - PocketBase.cn" description="使用 GitHub 登录以进行点赞、收藏等社区功能。">
+<BaseLayout
+  title="登录 - PocketBase.cn"
+  description="使用 GitHub 登录以进行点赞、收藏等社区功能。"
+  noindex={true}
+>
   <h1 class="text-2xl font-semibold tracking-tight">登录</h1>
   <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
     登录后可对插件点赞（Star）与对案例投票（Vote）。
@@ -13,4 +17,3 @@ import LoginPanel from "@/components/auth/LoginPanel";
     <LoginPanel client:load />
   </div>
 </BaseLayout>
-

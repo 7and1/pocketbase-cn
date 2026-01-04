@@ -3,30 +3,62 @@ import { POCKETBASE_URL } from "@/lib/constants/config";
 import { TableSkeleton } from "@/components/ui/Skeleton";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { fetchApi, postApi } from "@/lib/utils/api";
+import { getErrorMessage } from "@/lib/errors/AppError";
+import { cn } from "@/lib/utils/cn";
 
-type DownloadFile = {
+export type DownloadPlatform =
+  | "windows"
+  | "darwin"
+  | "linux"
+  | "freebsd"
+  | "openbsd"
+  | "netbsd"
+  | "";
+export type DownloadArch =
+  | "amd64"
+  | "arm64"
+  | "armv7"
+  | "386"
+  | "ppc64le"
+  | "s390x"
+  | "riscv64"
+  | "";
+
+export interface DownloadFile {
   id: string;
   version: string;
-  platform: string;
-  arch: string;
+  platform: DownloadPlatform;
+  arch: DownloadArch;
   checksum?: string;
   size?: number;
   prerelease?: boolean;
   published_at?: string | null;
   url?: string | null;
-};
+}
 
-function guessClientTarget() {
+export interface ClientTarget {
+  platform: DownloadPlatform;
+  arch: DownloadArch;
+}
+
+export interface InitialDownloads {
+  versions: string[];
+  version: string;
+  files: DownloadFile[];
+}
+
+function guessClientTarget(): ClientTarget | null {
   if (typeof navigator === "undefined") return null;
   const ua = navigator.userAgent || "";
-  const platform = (() => {
+  const platform = (): DownloadPlatform => {
     if (/windows/i.test(ua)) return "windows";
     if (/macintosh|mac os x/i.test(ua)) return "darwin";
     if (/linux/i.test(ua)) return "linux";
     return "";
-  })();
+  };
 
-  const arch = (() => {
+  const arch = (): DownloadArch => {
     if (/arm64|aarch64/i.test(ua)) return "arm64";
     if (/armv7/i.test(ua)) return "armv7";
     if (/ppc64le/i.test(ua)) return "ppc64le";
@@ -34,10 +66,12 @@ function guessClientTarget() {
     if (/x86_64|win64|x64|amd64/i.test(ua)) return "amd64";
     if (/i386|i686|x86/i.test(ua)) return "386";
     return "";
-  })();
+  };
 
-  if (!platform || !arch) return null;
-  return { platform, arch };
+  const p = platform();
+  const a = arch();
+  if (!p || !a) return null;
+  return { platform: p, arch: a };
 }
 
 function bytes(n?: number) {
@@ -53,15 +87,20 @@ function bytes(n?: number) {
   return `${x.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
-function DownloadsBrowserContent() {
-  const [versions, setVersions] = useState<string[]>([]);
-  const [version, setVersion] = useState<string>("");
-  const [files, setFiles] = useState<DownloadFile[]>([]);
-  const [target, setTarget] = useState<{
-    platform: string;
-    arch: string;
-  } | null>(null);
-  const [loadingVersions, setLoadingVersions] = useState(true);
+function DownloadsBrowserContent({ initial }: { initial?: InitialDownloads }) {
+  const [versions, setVersions] = useState<string[]>(
+    () => initial?.versions || [],
+  );
+  const [version, setVersion] = useState<string>(() => initial?.version || "");
+  const [files, setFiles] = useState<DownloadFile[]>(
+    () => initial?.files || [],
+  );
+  const initialFilesVersionRef = useMemo(() => initial?.version || "", []);
+  const initialHasFilesRef = useMemo(() => Boolean(initial?.files?.length), []);
+  const [target, setTarget] = useState<ClientTarget | null>(null);
+  const [loadingVersions, setLoadingVersions] = useState(
+    () => !initial?.versions?.length,
+  );
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedChecksum, setCopiedChecksum] = useState<string | null>(null);
@@ -77,62 +116,60 @@ function DownloadsBrowserContent() {
 
   useEffect(() => {
     let alive = true;
-    setLoadingVersions(true);
-    fetch(versionsUrl, { headers: { Accept: "application/json" } })
-      .then(async (r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((json) => {
-        if (!alive) return;
-        const list = Array.isArray(json?.data) ? json.data : [];
+    // If we have SSR data, refresh silently; otherwise show loading.
+    setLoadingVersions(!initial?.versions?.length);
+
+    const loadVersions = async () => {
+      const result = await fetchApi<{ data: string[] }>(versionsUrl);
+      if (!alive) return;
+
+      if (result.error) {
+        setError(getErrorMessage(result.error));
+      } else {
+        const list = result.data?.data ?? [];
         setVersions(list);
-        setVersion(list[0] || "");
-      })
-      .catch((e) => {
-        if (!alive) return;
-        setError(e?.message || "加载失败");
-      })
-      .finally(() => {
-        if (!alive) return;
-        setLoadingVersions(false);
-      });
+        setVersion((prev) => prev || list[0] || "");
+      }
+      setLoadingVersions(false);
+    };
+
+    loadVersions();
+
     return () => {
       alive = false;
     };
-  }, [versionsUrl]);
+  }, [versionsUrl, initial?.versions?.length]);
 
   useEffect(() => {
     if (!version) return;
     let alive = true;
-    setLoadingFiles(true);
+    const shouldShowLoading = !(
+      initialHasFilesRef && version === initialFilesVersionRef
+    );
+    setLoadingFiles(shouldShowLoading);
     setError(null);
 
     const url = new URL("/api/downloads/files", POCKETBASE_URL);
     url.searchParams.set("version", version);
 
-    fetch(url.toString(), { headers: { Accept: "application/json" } })
-      .then(async (r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((json) => {
-        if (!alive) return;
-        setFiles(Array.isArray(json?.data) ? json.data : []);
-      })
-      .catch((e) => {
-        if (!alive) return;
-        setError(e?.message || "加载失败");
-      })
-      .finally(() => {
-        if (!alive) return;
-        setLoadingFiles(false);
-      });
+    const loadFiles = async () => {
+      const result = await fetchApi<{ data: DownloadFile[] }>(url.toString());
+      if (!alive) return;
+
+      if (result.error) {
+        setError(getErrorMessage(result.error));
+      } else {
+        setFiles(result.data?.data ?? []);
+      }
+      setLoadingFiles(false);
+    };
+
+    loadFiles();
 
     return () => {
       alive = false;
     };
-  }, [version]);
+  }, [version, initialFilesVersionRef, initialHasFilesRef]);
 
   const recommended = useMemo(() => {
     if (!target) return null;
@@ -155,15 +192,14 @@ function DownloadsBrowserContent() {
 
   const trackDownload = async (file: DownloadFile) => {
     try {
-      await fetch(new URL("/api/downloads/track", POCKETBASE_URL).toString(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      await postApi(
+        new URL("/api/downloads/track", POCKETBASE_URL).toString(),
+        {
           version: file.version,
           platform: file.platform,
           arch: file.arch,
-        }),
-      });
+        },
+      );
     } catch {
       // Silently fail tracking - download should still work
     }
@@ -258,80 +294,175 @@ function DownloadsBrowserContent() {
       ) : null}
 
       {!loadingFiles && files.length > 0 ? (
-        <div className="overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-800">
-          <table className="w-full text-sm">
-            <thead className="bg-neutral-50 text-left dark:bg-neutral-900">
-              <tr>
-                <th className="px-4 py-2" scope="col">
-                  平台
-                </th>
-                <th className="px-4 py-2" scope="col">
-                  架构
-                </th>
-                <th className="px-4 py-2" scope="col">
-                  大小
-                </th>
-                <th className="px-4 py-2" scope="col">
-                  校验
-                </th>
-                <th className="px-4 py-2" scope="col">
-                  链接
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {files.map((f) => (
-                <tr
-                  key={f.id}
-                  className={[
-                    "border-t border-neutral-200 dark:border-neutral-800",
-                    recommended?.id === f.id
-                      ? "bg-brand-50/70 dark:bg-brand-950/20"
-                      : "",
-                  ].join(" ")}
-                >
-                  <td className="px-4 py-2">{f.platform}</td>
-                  <td className="px-4 py-2">{f.arch}</td>
-                  <td className="px-4 py-2">{bytes(f.size)}</td>
-                  <td className="px-4 py-2 font-mono text-xs">
-                    {f.checksum ? (
-                      <span className="inline-flex items-center gap-2">
-                        <span title={f.checksum}>
-                          {f.checksum.slice(0, 12)}…
+        <>
+          {/* Desktop Table View */}
+          <div className="hidden overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-800 md:block">
+            <table className="w-full text-sm">
+              <thead className="bg-neutral-50 text-left dark:bg-neutral-900">
+                <tr>
+                  <th className="px-4 py-2" scope="col">
+                    平台
+                  </th>
+                  <th className="px-4 py-2" scope="col">
+                    架构
+                  </th>
+                  <th className="px-4 py-2" scope="col">
+                    大小
+                  </th>
+                  <th className="px-4 py-2" scope="col">
+                    校验
+                  </th>
+                  <th className="px-4 py-2" scope="col">
+                    链接
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {files.map((f) => (
+                  <tr
+                    key={f.id}
+                    className={[
+                      "border-t border-neutral-200 dark:border-neutral-800",
+                      recommended?.id === f.id
+                        ? "bg-brand-50/70 dark:bg-brand-950/20"
+                        : "",
+                    ].join(" ")}
+                  >
+                    <td className="px-4 py-2">{f.platform}</td>
+                    <td className="px-4 py-2">{f.arch}</td>
+                    <td className="px-4 py-2">{bytes(f.size)}</td>
+                    <td className="px-4 py-2 font-mono text-xs">
+                      {f.checksum ? (
+                        <span className="inline-flex items-center gap-2">
+                          <span title={f.checksum}>
+                            {f.checksum.slice(0, 12)}…
+                          </span>
+                          <button
+                            type="button"
+                            className="rounded border border-neutral-200 bg-white px-2 py-1 text-[11px] hover:bg-neutral-50 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:border-neutral-800 dark:bg-neutral-950 dark:hover:bg-neutral-900"
+                            onClick={() => copyChecksum(f.checksum!)}
+                            aria-label={`复制校验值 ${f.checksum.slice(0, 12)}`}
+                          >
+                            {copiedChecksum === f.checksum ? "已复制" : "复制"}
+                          </button>
                         </span>
-                        <button
-                          type="button"
-                          className="rounded border border-neutral-200 bg-white px-2 py-1 text-[11px] hover:bg-neutral-50 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:border-neutral-800 dark:bg-neutral-950 dark:hover:bg-neutral-900"
-                          onClick={() => copyChecksum(f.checksum!)}
-                          aria-label={`复制校验值 ${f.checksum.slice(0, 12)}`}
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                    <td className="px-4 py-2">
+                      {f.url ? (
+                        <a
+                          className="text-brand-700 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 rounded dark:text-brand-300"
+                          href={f.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => trackDownload(f)}
                         >
-                          {copiedChecksum === f.checksum ? "已复制" : "复制"}
-                        </button>
+                          下载
+                        </a>
+                      ) : (
+                        <span className="text-neutral-500">-</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile Card View */}
+          <div className="space-y-3 md:hidden">
+            {files.map((f) => (
+              <div
+                key={f.id}
+                className={cn(
+                  "overflow-hidden rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-950",
+                  recommended?.id === f.id
+                    ? "border-brand-300 bg-brand-50/50 dark:border-brand-700 dark:bg-brand-950/30"
+                    : "",
+                )}
+              >
+                <div className="border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-medium text-neutral-900 dark:text-neutral-100">
+                      {f.platform} / {f.arch}
+                    </h3>
+                    {recommended?.id === f.id ? (
+                      <span className="rounded-full bg-brand-600 px-2 py-0.5 text-xs font-medium text-white">
+                        推荐
                       </span>
-                    ) : (
-                      "-"
-                    )}
-                  </td>
-                  <td className="px-4 py-2">
+                    ) : null}
+                  </div>
+                  <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+                    {bytes(f.size)}
+                  </p>
+                </div>
+                <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
+                  <div className="flex justify-between px-4 py-3">
+                    <span className="text-sm text-neutral-600 dark:text-neutral-400">
+                      校验值
+                    </span>
+                    <span className="font-mono text-xs text-neutral-900 dark:text-neutral-100">
+                      {f.checksum ? (
+                        <span className="inline-flex items-center gap-2">
+                          <span
+                            title={f.checksum}
+                            className="max-w-[120px] truncate"
+                          >
+                            {f.checksum.slice(0, 12)}…
+                          </span>
+                          <button
+                            type="button"
+                            className="rounded border border-neutral-200 bg-white px-2 py-1 text-[11px] hover:bg-neutral-50 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:border-neutral-800 dark:bg-neutral-950 dark:hover:bg-neutral-900"
+                            onClick={() => copyChecksum(f.checksum!)}
+                            aria-label={`复制校验值 ${f.checksum.slice(0, 12)}`}
+                          >
+                            {copiedChecksum === f.checksum ? "已复制" : "复制"}
+                          </button>
+                        </span>
+                      ) : (
+                        "-"
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex justify-between px-4 py-3">
+                    <span className="text-sm text-neutral-600 dark:text-neutral-400">
+                      下载链接
+                    </span>
                     {f.url ? (
                       <a
-                        className="text-brand-700 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 rounded dark:text-brand-300"
+                        className="min-h-[44px] min-w-[44px] inline-flex items-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
                         href={f.url}
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={() => trackDownload(f)}
                       >
+                        <svg
+                          className="mr-1 h-4 w-4"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                          />
+                        </svg>
                         下载
                       </a>
                     ) : (
                       <span className="text-neutral-500">-</span>
                     )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       ) : null}
 
       {!loadingFiles && files.length === 0 && !error ? (
@@ -353,10 +484,12 @@ function DownloadsBrowserContent() {
   );
 }
 
-export default function DownloadsBrowser() {
+export default function DownloadsBrowser(props: {
+  initial?: InitialDownloads;
+}) {
   return (
     <ErrorBoundary>
-      <DownloadsBrowserContent />
+      <DownloadsBrowserContent initial={props.initial} />
     </ErrorBoundary>
   );
 }

@@ -58,3 +58,38 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* Shimmer animation for skeleton loading */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s ease-in-out infinite;
+}
+
+/* Content visibility for performance optimization */
+@supports (content-visibility: auto) {
+  main > section {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 500px;
+  }
+}
+
+/* Image loading optimization */
+img {
+  image-rendering: auto;
+}
+
+img[loading="lazy"] {
+  background-color: theme("colors.neutral.100");
+}
+
+.dark img[loading="lazy"] {
+  background-color: theme("colors.neutral.900");
+}

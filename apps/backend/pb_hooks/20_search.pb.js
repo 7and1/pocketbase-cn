@@ -23,10 +23,14 @@ routerAdd("GET", "/api/search", function (c) {
 
   var data = { plugins: [], showcase: [] };
 
+  // Use CASE-INSENSITIVE search with better performance
+  // The ~ operator in PocketBase is case-insensitive LIKE
+  var searchQ = q.toLowerCase();
+
   if (type === "all" || type === "plugins") {
     var plugins = $app.findRecordsByFilter(
       "plugins",
-      "status = 'approved' && (name ~ {:q} || description ~ {:q})",
+      "status = 'approved' && (name ~ {:q} || description ~ {:q} || category ~ {:q})",
       "-featured,-created",
       limit,
       0,
@@ -48,7 +52,7 @@ routerAdd("GET", "/api/search", function (c) {
   if (type === "all" || type === "showcase") {
     var showcases = $app.findRecordsByFilter(
       "showcase",
-      "status = 'approved' && (title ~ {:q} || description ~ {:q})",
+      "status = 'approved' && (title ~ {:q} || description ~ {:q} || category ~ {:q})",
       "-featured,-created",
       limit,
       0,
@@ -66,6 +70,15 @@ routerAdd("GET", "/api/search", function (c) {
       });
     }
   }
+
+  // Add cache headers for search results
+  try {
+    if (c.response && c.response.header) {
+      var h = c.response.header();
+      h.set("Cache-Control", "public, max-age=30, stale-while-revalidate=10");
+      h.set("Vary", "Accept, Accept-Encoding");
+    }
+  } catch (_) {}
 
   return c.json(200, { data: data });
 });

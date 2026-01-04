@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { POCKETBASE_URL } from "@/lib/constants/config";
+import { fetchWithCsrf } from "@/lib/utils/csrf";
 
 type MessageStatus = "success" | "error" | null;
 
@@ -18,7 +19,7 @@ export default function NewsletterForm() {
         setMessageStatus(null);
         setLoading(true);
         try {
-          const res = await fetch(
+          const res = await fetchWithCsrf(
             new URL("/api/newsletter/subscribe", POCKETBASE_URL).toString(),
             {
               method: "POST",

@@ -13,7 +13,7 @@ if (token) {
 }
 ---
 
-<BaseLayout title="退订 - PocketBase.cn" description="退订 PocketBase 版本更新通知。">
+<BaseLayout title="退订 - PocketBase.cn" description="退订 PocketBase 版本更新通知。" noindex={true}>
   <h1 class="text-2xl font-semibold tracking-tight">退订</h1>
   {status === "unsubscribed" ? (
     <p class="mt-3 text-neutral-700 dark:text-neutral-300">已退订。你将不再收到版本更新邮件。</p>
@@ -26,4 +26,3 @@ if (token) {
     <a class="text-brand-700 hover:underline dark:text-brand-300" href="/">返回首页</a>
   </div>
 </BaseLayout>
-

@@ -3,7 +3,7 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
 import ModerationPanel from "@/components/admin/ModerationPanel";
 ---
 
-<BaseLayout title="审核队列 - PocketBase.cn" description="PocketBase.cn 管理员/版主审核队列。">
+<BaseLayout title="审核队列 - PocketBase.cn" description="PocketBase.cn 管理员/版主审核队列。" noindex={true}>
   <h1 class="text-2xl font-semibold tracking-tight">审核队列</h1>
   <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
     仅 moderator/admin 可访问。
@@ -13,4 +13,3 @@ import ModerationPanel from "@/components/admin/ModerationPanel";
     <ModerationPanel client:load />
   </div>
 </BaseLayout>
-
