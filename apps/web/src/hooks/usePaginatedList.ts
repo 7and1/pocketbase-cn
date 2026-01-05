@@ -39,7 +39,8 @@ export function usePaginatedList<T>({
     Boolean(initial?.endpointUrl) && initial?.endpointUrl === endpointUrl;
   const initialAppliedRef = useRef(false);
 
-  const [loading, setLoading] = useState(false);
+  // Start loading if no valid initial data
+  const [loading, setLoading] = useState(() => !initialMatches);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<T[]>(() =>

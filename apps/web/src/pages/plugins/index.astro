@@ -19,11 +19,11 @@ if (sort) endpointUrl.searchParams.set("sort", sort);
 endpointUrl.searchParams.set("limit", String(LIMIT));
 endpointUrl.searchParams.set("offset", "0");
 
-let initial = {
-  endpointUrl: endpointUrl.toString(),
-  items: [] as unknown[],
-  meta: {} as Record<string, unknown>,
-};
+let initial: {
+  endpointUrl: string;
+  items: unknown[];
+  meta: Record<string, unknown>;
+} | undefined;
 
 try {
   const res = await fetch(endpointUrl.toString(), {
@@ -31,11 +31,14 @@ try {
   });
   if (res.ok) {
     const json = await res.json();
-    initial.items = Array.isArray(json?.data) ? json.data : [];
-    initial.meta = json?.meta && typeof json.meta === "object" ? json.meta : {};
+    initial = {
+      endpointUrl: endpointUrl.toString(),
+      items: Array.isArray(json?.data) ? json.data : [],
+      meta: json?.meta && typeof json.meta === "object" ? json.meta : {},
+    };
   }
 } catch {
-  // Best-effort SSR: fall back to client fetching.
+  // SSR fetch failed - leave initial undefined so client will fetch
 }
 
 const hasFilters = Boolean(q || category || sort !== DEFAULT_SORT);
