@@ -77,10 +77,8 @@ migrate(
 
       app.save(pluginStats);
     }
-
-    return app;
   },
   (app) => {
-    return app;
+    // down migration - indexes are safe to leave
   },
 );
