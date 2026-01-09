@@ -1,54 +1,4 @@
-// ETag generation for HTTP caching
-function _pbcnGenerateETag(data) {
-  try {
-    var json = JSON.stringify(data || {});
-    if ($security && $security.hs256) {
-      return $security.hs256(json, "pbcn-etag-v1");
-    }
-    var hash = 0;
-    for (var i = 0; i < json.length; i++) {
-      var ch = json.charCodeAt(i);
-      hash = (hash << 5) - hash + ch;
-      hash = hash & hash;
-    }
-    return "h-" + Math.abs(hash).toString(36);
-  } catch (_) {
-    return Date.now().toString(36);
-  }
-}
-
-function _pbcnCheckETag(c, etag) {
-  try {
-    var ifNoneMatch = "";
-    if (c.request && c.request.header) {
-      ifNoneMatch = c.request.header.get("If-None-Match") || "";
-    }
-    if (ifNoneMatch && ifNoneMatch === etag) {
-      return true;
-    }
-  } catch (_) {}
-  return false;
-}
-
-function _pbcnSetCacheHeaders(c, etag, cacheControl) {
-  try {
-    if (c && c.response && c.response.header) {
-      var h = c.response.header();
-      if (etag) h.set("ETag", etag);
-      h.set("Cache-Control", cacheControl);
-      h.set("Vary", "Accept, Accept-Encoding");
-      return;
-    }
-  } catch (_) {}
-  try {
-    if (c && c.response && c.response().header) {
-      var h2 = c.response().header();
-      if (etag) h2.set("ETag", etag);
-      h2.set("Cache-Control", cacheControl);
-      h2.set("Vary", "Accept, Accept-Encoding");
-    }
-  } catch (_) {}
-}
+// Showcase API routes - all cache/ETag helpers are in lib/pbcn.js
 
 routerAdd("GET", "/api/showcase/featured", function (c) {
   var pbcn = require(__hooks + "/lib/pbcn.js");
@@ -90,13 +40,13 @@ routerAdd("GET", "/api/showcase/featured", function (c) {
   }
 
   var response = { data: data, meta: { total: data.length } };
-  var etag = _pbcnGenerateETag(response);
+  var etag = pbcn.generateETag(response);
 
-  if (_pbcnCheckETag(c, etag)) {
+  if (pbcn.checkETag(c, etag)) {
     return c.noContent(304);
   }
 
-  _pbcnSetCacheHeaders(
+  pbcn.setCacheHeaders(
     c,
     etag,
     "public, max-age=300, s-maxage=600, stale-while-revalidate=30",
@@ -204,13 +154,13 @@ routerAdd("GET", "/api/showcase/list", function (c) {
 
   // Use shorter cache for search results, longer for filtered lists
   var cacheAge = q ? 30 : 60;
-  var etag = _pbcnGenerateETag(response);
+  var etag = pbcn.generateETag(response);
 
-  if (_pbcnCheckETag(c, etag)) {
+  if (pbcn.checkETag(c, etag)) {
     return c.noContent(304);
   }
 
-  _pbcnSetCacheHeaders(
+  pbcn.setCacheHeaders(
     c,
     etag,
     "public, max-age=" + cacheAge + ", s-maxage=120, stale-while-revalidate=10",
@@ -286,7 +236,7 @@ routerAdd("GET", "/api/showcase/{slug}", function (c) {
   };
 
   // Detail view gets shorter cache due to view increment
-  _pbcnSetCacheHeaders(
+  pbcn.setCacheHeaders(
     c,
     null,
     "public, max-age=60, s-maxage=120, stale-while-revalidate=15",

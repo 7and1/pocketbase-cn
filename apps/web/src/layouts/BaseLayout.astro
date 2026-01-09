@@ -24,6 +24,11 @@ const gaId = publicEnv.PUBLIC_GA_ID;
 const umamiSrc = publicEnv.PUBLIC_UMAMI_SRC;
 const umamiWebsiteId = publicEnv.PUBLIC_UMAMI_WEBSITE_ID;
 const baiduVerification = publicEnv.PUBLIC_BAIDU_SITE_VERIFICATION;
+const analyticsConfig = {
+  gaId,
+  umamiSrc,
+  umamiWebsiteId,
+};
 
 let apiOrigin = "";
 try {
@@ -134,6 +139,7 @@ function generateSchema(pageType: string, additionalData: Record<string, any> = 
         programmingLanguage: additionalData.language || "JavaScript",
         runtimePlatform: "PocketBase",
         codeRepository: additionalData.codeRepository || additionalData.repository,
+        ...(additionalData.image && { image: additionalData.image }),
         ...(additionalData.version && { version: additionalData.version }),
         offers: {
           "@type": "Offer",
@@ -250,12 +256,13 @@ if (import.meta.env.DEV) {
     <meta property="og:image" content={ogImage} />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="PocketBase.cn" />
+    <meta property="og:image:alt" content={title} />
 
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
+    <meta name="twitter:image:alt" content={title} />
 
     <link rel="icon" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/favicon.svg" />
@@ -317,24 +324,69 @@ if (import.meta.env.DEV) {
       </script>
     ) : null}
 
-    {gaId ? (
-      <Fragment>
-        <script async src={`https://www.googletagmanager.com/gtag/js?id=${gaId}`}></script>
-        <script is:inline>
-          {`window.dataLayer = window.dataLayer || [];
-function gtag(){dataLayer.push(arguments);}
-gtag('js', new Date());
-gtag('config', '${gaId}', { anonymize_ip: true });`}
-        </script>
-      </Fragment>
-    ) : null}
+    {(analyticsConfig.gaId || analyticsConfig.umamiSrc) ? (
+      <script is:inline>
+        {`(function() {
+  var config = ${JSON.stringify(analyticsConfig)};
+  var CONSENT_KEY = "pb-cookie-consent";
 
-    {umamiSrc && umamiWebsiteId ? (
-      <script
-        async
-        src={umamiSrc}
-        data-website-id={umamiWebsiteId}
-      ></script>
+  function hasConsent() {
+    try {
+      return localStorage.getItem(CONSENT_KEY) === "all";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function loadScript(src, attrs) {
+    if (!src) return;
+    var script = document.createElement("script");
+    script.async = true;
+    script.src = src;
+    if (attrs) {
+      Object.keys(attrs).forEach(function(key) {
+        script.setAttribute(key, attrs[key]);
+      });
+    }
+    document.head.appendChild(script);
+  }
+
+  function loadGA() {
+    if (!config.gaId || window.__pbGaLoaded) return;
+    window.__pbGaLoaded = true;
+    loadScript("https://www.googletagmanager.com/gtag/js?id=" + config.gaId);
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    window.gtag = window.gtag || gtag;
+    gtag("js", new Date());
+    gtag("config", config.gaId, { anonymize_ip: true });
+  }
+
+  function loadUmami() {
+    if (!config.umamiSrc || !config.umamiWebsiteId || window.__pbUmamiLoaded) return;
+    window.__pbUmamiLoaded = true;
+    loadScript(config.umamiSrc, { "data-website-id": config.umamiWebsiteId });
+  }
+
+  function loadAll() {
+    if (!hasConsent()) return;
+    loadGA();
+    loadUmami();
+  }
+
+  window.__pbAnalytics = { loadAll: loadAll };
+
+  if (hasConsent()) {
+    loadAll();
+  }
+
+  window.addEventListener("pb:consent", function(event) {
+    if (event && event.detail === "all") {
+      loadAll();
+    }
+  });
+})();`}
+      </script>
     ) : null}
   </head>
   <body class="min-h-screen">

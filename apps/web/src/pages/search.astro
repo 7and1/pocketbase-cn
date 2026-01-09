@@ -1,0 +1,294 @@
+---
+export const prerender = false;
+
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { getCollection } from "astro:content";
+import { POCKETBASE_URL, SITE_URL } from "../lib/constants/config";
+
+const query = (Astro.url.searchParams.get("q") || "").trim();
+const normalizedQuery = query.toLowerCase();
+const hasQuery = normalizedQuery.length >= 2;
+
+const canonical = new URL("/search/", SITE_URL).toString();
+const description = "PocketBase.cn 站内搜索，支持文档、博客、插件与案例。";
+
+const docs = await getCollection("docs");
+const blog = await getCollection("blog", ({ data }) => !data.draft);
+
+function normalizeText(value: string) {
+  return String(value || "").toLowerCase();
+}
+
+function matches(text: string) {
+  return normalizeText(text).includes(normalizedQuery);
+}
+
+function routeForId(id: string) {
+  const normalized = String(id || "").replace(/^\/+|\/+$/g, "");
+  if (!normalized) return "/";
+  if (normalized.endsWith("/index"))
+    return `/${normalized.slice(0, -"/index".length)}/`;
+  if (normalized === "index") return "/";
+  return `/${normalized}/`;
+}
+
+const docResults = hasQuery
+  ? docs
+      .filter((doc) => {
+        const haystack = [
+          doc.data.title,
+          doc.data.description || "",
+          doc.id,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return matches(haystack);
+      })
+      .slice(0, 8)
+  : [];
+
+const blogResults = hasQuery
+  ? blog
+      .filter((post) => {
+        const haystack = [
+          post.data.title,
+          post.data.description,
+          post.data.category,
+          post.data.tags.join(" "),
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return matches(haystack);
+      })
+      .slice(0, 8)
+  : [];
+
+let pluginResults: {
+  name: string;
+  slug: string;
+  description?: string;
+  category?: string;
+}[] = [];
+let showcaseResults: {
+  title: string;
+  slug: string;
+  description?: string;
+  category?: string;
+}[] = [];
+
+if (hasQuery) {
+  try {
+    const url = new URL("/api/search", POCKETBASE_URL);
+    url.searchParams.set("q", query);
+    url.searchParams.set("type", "all");
+    url.searchParams.set("limit", "20");
+    const res = await fetch(url.toString(), {
+      headers: { Accept: "application/json" },
+    });
+    if (res.ok) {
+      const json = await res.json();
+      pluginResults = Array.isArray(json?.data?.plugins)
+        ? json.data.plugins
+        : [];
+      showcaseResults = Array.isArray(json?.data?.showcase)
+        ? json.data.showcase
+        : [];
+    }
+  } catch {
+    pluginResults = [];
+    showcaseResults = [];
+  }
+}
+
+const totalResults =
+  docResults.length +
+  blogResults.length +
+  pluginResults.length +
+  showcaseResults.length;
+
+Astro.response.headers.set(
+  "Cache-Control",
+  hasQuery
+    ? "no-store"
+    : "public, max-age=120, s-maxage=600, stale-while-revalidate=600",
+);
+---
+
+<BaseLayout
+  title="站内搜索 - PocketBase.cn"
+  description={description}
+  canonical={canonical}
+  noindex={Boolean(query)}
+>
+  <div class="max-w-3xl">
+    <h1 class="text-2xl font-semibold tracking-tight">站内搜索</h1>
+    <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+      搜索文档、博客、插件与案例，输入至少 2 个字符开始检索。
+    </p>
+
+    <form class="mt-6 flex flex-col gap-3 sm:flex-row" method="get" action="/search">
+      <label class="sr-only" for="site-search">
+        搜索关键词
+      </label>
+      <input
+        id="site-search"
+        name="q"
+        value={query}
+        placeholder="例如：OAuth、部署、插件"
+        class="w-full flex-1 rounded-md border border-neutral-200 bg-white px-4 py-3 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-neutral-800 dark:bg-neutral-950"
+        autoComplete="off"
+      />
+      <button
+        type="submit"
+        class="rounded-md bg-brand-600 px-4 py-3 text-sm font-medium text-white hover:bg-brand-700"
+      >
+        搜索
+      </button>
+    </form>
+
+    {!hasQuery && query.length > 0 ? (
+      <p class="mt-4 text-sm text-amber-700 dark:text-amber-300">
+        请输入至少 2 个字符以开始搜索。
+      </p>
+    ) : null}
+
+    {!hasQuery ? (
+      <section class="mt-10 rounded-xl border border-neutral-200 bg-neutral-50 p-6 dark:border-neutral-800 dark:bg-neutral-900">
+        <h2 class="text-lg font-semibold">热门搜索建议</h2>
+        <div class="mt-4 flex flex-wrap gap-2 text-sm">
+          {[
+            "PocketBase 下载",
+            "OAuth 登录",
+            "部署指南",
+            "插件市场",
+            "文件上传",
+            "实时订阅",
+          ].map((term) => (
+            <a
+              href={`/search?q=${encodeURIComponent(term)}`}
+              class="rounded-full border border-neutral-200 bg-white px-3 py-1 text-neutral-700 hover:border-brand-300 hover:text-brand-700 dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-300 dark:hover:border-brand-500"
+            >
+              {term}
+            </a>
+          ))}
+        </div>
+      </section>
+    ) : null}
+
+    {hasQuery ? (
+      <div class="mt-10 space-y-8">
+        <p class="text-sm text-neutral-600 dark:text-neutral-400">
+          共找到 {totalResults} 条结果
+        </p>
+
+        {docResults.length > 0 ? (
+          <section>
+            <h2 class="text-lg font-semibold">文档</h2>
+            <ul class="mt-3 space-y-3">
+              {docResults.map((doc) => (
+                <li class="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+                  <a
+                    href={routeForId(doc.id)}
+                    class="font-medium text-brand-700 hover:underline dark:text-brand-300"
+                  >
+                    {doc.data.title}
+                  </a>
+                  {doc.data.description ? (
+                    <p class="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+                      {doc.data.description}
+                    </p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {blogResults.length > 0 ? (
+          <section>
+            <h2 class="text-lg font-semibold">博客</h2>
+            <ul class="mt-3 space-y-3">
+              {blogResults.map((post) => (
+                <li class="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+                  <a
+                    href={`/blog/${post.id}/`}
+                    class="font-medium text-brand-700 hover:underline dark:text-brand-300"
+                  >
+                    {post.data.title}
+                  </a>
+                  <p class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                    {post.data.category} ·{" "}
+                    {new Date(post.data.publishDate).toLocaleDateString("zh-CN")}
+                  </p>
+                  <p class="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+                    {post.data.description}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {pluginResults.length > 0 ? (
+          <section>
+            <h2 class="text-lg font-semibold">插件</h2>
+            <ul class="mt-3 space-y-3">
+              {pluginResults.map((plugin) => (
+                <li class="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+                  <a
+                    href={`/plugins/${plugin.slug}`}
+                    class="font-medium text-brand-700 hover:underline dark:text-brand-300"
+                  >
+                    {plugin.name}
+                  </a>
+                  {plugin.category ? (
+                    <span class="ml-2 rounded bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                      {plugin.category}
+                    </span>
+                  ) : null}
+                  {plugin.description ? (
+                    <p class="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+                      {plugin.description}
+                    </p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {showcaseResults.length > 0 ? (
+          <section>
+            <h2 class="text-lg font-semibold">案例</h2>
+            <ul class="mt-3 space-y-3">
+              {showcaseResults.map((item) => (
+                <li class="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+                  <a
+                    href={`/showcase/${item.slug}`}
+                    class="font-medium text-brand-700 hover:underline dark:text-brand-300"
+                  >
+                    {item.title}
+                  </a>
+                  {item.category ? (
+                    <span class="ml-2 rounded bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                      {item.category}
+                    </span>
+                  ) : null}
+                  {item.description ? (
+                    <p class="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+                      {item.description}
+                    </p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {totalResults === 0 ? (
+          <p class="text-sm text-neutral-500">暂无匹配结果，试试其他关键词。</p>
+        ) : null}
+      </div>
+    ) : null}
+  </div>
+</BaseLayout>

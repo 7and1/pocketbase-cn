@@ -21,18 +21,19 @@ export default function CookieConsent() {
     localStorage.setItem(COOKIE_CONSENT_KEY, "all");
     setConsent("all");
     setVisible(false);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("pb:consent", { detail: "all" }));
+      const w = window as typeof window & {
+        __pbAnalytics?: { loadAll?: () => void };
+      };
+      w.__pbAnalytics?.loadAll?.();
+    }
   };
 
   const handleRejectNonEssential = () => {
     localStorage.setItem(COOKIE_CONSENT_KEY, "essential");
     setConsent("essential");
     setVisible(false);
-    // Disable analytics if already loaded
-    if (typeof window !== "undefined") {
-      (window as unknown as { [key: string]: unknown })[
-        "ga-disable-GA_MEASUREMENT_ID"
-      ] = true;
-    }
   };
 
   if (!visible) return null;

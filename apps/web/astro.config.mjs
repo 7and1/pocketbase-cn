@@ -12,7 +12,6 @@ const SITE_URL = env.PUBLIC_SITE_URL;
 
 export default defineConfig({
   site: SITE_URL,
-  // Astro v5: default output supports per-route `prerender` (SSR where needed).
   adapter: cloudflare({
     platformProxy: { enabled: false }, // Disable to avoid build error
     imageService: "compile",
@@ -24,6 +23,7 @@ export default defineConfig({
         "/robots.txt",
         "/sw.js",
         "/_astro/*",
+        "/pagefind/*",
       ],
     },
   }),
@@ -35,6 +35,8 @@ export default defineConfig({
     starlight({
       title: "PocketBase.cn",
       description: "PocketBase 中文文档、插件市场、案例展示与下载镜像",
+      prerender: false, // Use SSR mode for Cloudflare Workers
+      pagefind: false, // Disable pagefind (incompatible with SSR)
       disable404Route: true,
       defaultLocale: "root",
       locales: {
@@ -52,6 +54,9 @@ export default defineConfig({
           href: "https://discord.gg/pocketbase",
         },
       ],
+      components: {
+        Footer: "./src/components/starlight/DocsFooter.astro",
+      },
       customCss: ["./src/styles/global.css", "./src/styles/starlight.css"],
       sidebar: [
         {
@@ -134,6 +139,9 @@ export default defineConfig({
   vite: {
     define: {
       __SITE_URL__: JSON.stringify(SITE_URL),
+    },
+    resolve: {
+      dedupe: ["react", "react-dom"],
     },
     build: {
       cssCodeSplit: true,

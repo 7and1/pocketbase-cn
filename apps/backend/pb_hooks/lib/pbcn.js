@@ -193,6 +193,66 @@ function isStaff(authRecord) {
 //
 // The schema uses a unique index on (key, endpoint), so we store the current window
 // start timestamp in `window_start` and increment `count` within that window.
+// ETag generation for HTTP caching (304 Not Modified support)
+function generateETag(data) {
+  try {
+    var json = JSON.stringify(data || {});
+    if ($security && $security.hs256) {
+      return $security.hs256(json, "pbcn-etag-v1");
+    }
+    // Fallback: simple hash-like string
+    var hash = 0;
+    for (var i = 0; i < json.length; i++) {
+      var ch = json.charCodeAt(i);
+      hash = (hash << 5) - hash + ch;
+      hash = hash & hash;
+    }
+    return "h-" + Math.abs(hash).toString(36);
+  } catch (_) {
+    return Date.now().toString(36);
+  }
+}
+
+// Check if ETag matches and return 304 if so
+function checkETag(c, etag) {
+  try {
+    var ifNoneMatch = "";
+    if (c.request && c.request.header) {
+      ifNoneMatch = c.request.header.get("If-None-Match") || "";
+    }
+    if (ifNoneMatch && ifNoneMatch === etag) {
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+// Set both ETag and Cache-Control headers
+function setCacheHeaders(c, etag, cacheControl) {
+  try {
+    if (c && c.response && c.response.header) {
+      var h = c.response.header();
+      if (etag) h.set("ETag", etag);
+      h.set("Cache-Control", cacheControl);
+      h.set("Vary", "Accept, Accept-Encoding");
+      return;
+    }
+  } catch (_) {}
+  try {
+    if (c && c.response && c.response().header) {
+      var h2 = c.response().header();
+      if (etag) h2.set("ETag", etag);
+      h2.set("Cache-Control", cacheControl);
+      h2.set("Vary", "Accept, Accept-Encoding");
+    }
+  } catch (_) {}
+}
+
+function setCacheControl(c, value) {
+  setCacheHeaders(c, null, value);
+}
+
+// DB-backed rate limiting using the `rate_limits` collection.
 function rateLimitAllow(opts) {
   var id = trim(opts && opts.id ? opts.id : "default");
   var key = trim(opts && opts.key ? opts.key : "");
@@ -273,4 +333,8 @@ module.exports = {
   hasRole: hasRole,
   isStaff: isStaff,
   rateLimitAllow: rateLimitAllow,
+  generateETag: generateETag,
+  checkETag: checkETag,
+  setCacheHeaders: setCacheHeaders,
+  setCacheControl: setCacheControl,
 };

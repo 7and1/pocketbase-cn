@@ -23,6 +23,11 @@ const plugin = json?.data;
 const readmeHtml = renderMarkdownSafe(String(plugin?.readme || ""));
 const iconUrl = plugin?.icon ? pocketbaseFileUrl("plugins", String(plugin?.id || ""), String(plugin.icon), { thumb: "100x100" }) : "";
 const screenshots = Array.isArray(plugin?.screenshots) ? plugin.screenshots : [];
+const ogImage = screenshots.length
+  ? pocketbaseFileUrl("plugins", String(plugin?.id || ""), String(screenshots[0]), { thumb: "1200x630" })
+  : plugin?.icon
+    ? pocketbaseFileUrl("plugins", String(plugin?.id || ""), String(plugin.icon), { thumb: "1200x630" })
+    : undefined;
 
 // Get latest version for schema
 const latestVersion = Array.isArray(plugin?.versions) && plugin.versions.length > 0
@@ -67,6 +72,7 @@ const pluginSchemaData = {
   repository: plugin?.repository,
   version: latestVersion,
   codeRepository: plugin?.repository,
+  image: ogImage,
   aggregateRating: normalizedRating ? {
     value: normalizedRating.toFixed(1),
     count: ratingCount
@@ -89,6 +95,7 @@ if (import.meta.env.DEV) {
   description={plugin?.description || ""}
   schemaType="SoftwareSourceCode"
   schemaData={pluginSchemaData}
+  ogImage={ogImage}
 >
   <div class="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
     <div class="min-w-0">

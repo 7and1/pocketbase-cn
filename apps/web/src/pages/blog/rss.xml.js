@@ -23,8 +23,8 @@ ${sortedPosts
     <item>
       <title><![CDATA[${post.data.title}]]></title>
       <description><![CDATA[${post.data.description}]]></description>
-      <link>${SITE_URL}/blog/${post.slug}/</link>
-      <guid>${SITE_URL}/blog/${post.slug}/</guid>
+      <link>${SITE_URL}/blog/${post.id}/</link>
+      <guid>${SITE_URL}/blog/${post.id}/</guid>
       <pubDate>${new Date(post.data.publishDate).toUTCString()}</pubDate>
       ${post.data.updatedDate ? `<lastBuildDate>${new Date(post.data.updatedDate).toUTCString()}</lastBuildDate>` : ""}
       ${post.data.category ? `<category><![CDATA[${post.data.category}]]></category>` : ""}

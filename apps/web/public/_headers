@@ -1,0 +1,7 @@
+# Prevent caching of HTML pages (Worker-generated)
+/*
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Cache static assets with long TTL
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable

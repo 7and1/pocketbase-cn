@@ -1,61 +1,4 @@
-// ETag generation for HTTP caching (304 Not Modified support)
-function _pbcnGenerateETag(data) {
-  try {
-    var json = JSON.stringify(data || {});
-    if ($security && $security.hs256) {
-      return $security.hs256(json, "pbcn-etag-v1");
-    }
-    // Fallback: simple hash-like string
-    var hash = 0;
-    for (var i = 0; i < json.length; i++) {
-      var ch = json.charCodeAt(i);
-      hash = (hash << 5) - hash + ch;
-      hash = hash & hash;
-    }
-    return "h-" + Math.abs(hash).toString(36);
-  } catch (_) {
-    return Date.now().toString(36);
-  }
-}
-
-// Check if ETag matches and return 304 if so
-function _pbcnCheckETag(c, etag) {
-  try {
-    var ifNoneMatch = "";
-    if (c.request && c.request.header) {
-      ifNoneMatch = c.request.header.get("If-None-Match") || "";
-    }
-    if (ifNoneMatch && ifNoneMatch === etag) {
-      return true;
-    }
-  } catch (_) {}
-  return false;
-}
-
-// Set both ETag and Cache-Control headers
-function _pbcnSetCacheHeaders(c, etag, cacheControl) {
-  try {
-    if (c && c.response && c.response.header) {
-      var h = c.response.header();
-      if (etag) h.set("ETag", etag);
-      h.set("Cache-Control", cacheControl);
-      h.set("Vary", "Accept, Accept-Encoding");
-      return;
-    }
-  } catch (_) {}
-  try {
-    if (c && c.response && c.response().header) {
-      var h2 = c.response().header();
-      if (etag) h2.set("ETag", etag);
-      h2.set("Cache-Control", cacheControl);
-      h2.set("Vary", "Accept, Accept-Encoding");
-    }
-  } catch (_) {}
-}
-
-function _pbcnSetCacheControl(c, value) {
-  _pbcnSetCacheHeaders(c, null, value);
-}
+// Plugins API routes - all cache/ETag helpers are in lib/pbcn.js
 
 routerAdd("GET", "/api/plugins/featured", function (c) {
   var pbcn = require(__hooks + "/lib/pbcn.js");
@@ -93,13 +36,13 @@ routerAdd("GET", "/api/plugins/featured", function (c) {
   }
 
   var response = { data: data, meta: { total: data.length } };
-  var etag = _pbcnGenerateETag(response);
+  var etag = pbcn.generateETag(response);
 
-  if (_pbcnCheckETag(c, etag)) {
+  if (pbcn.checkETag(c, etag)) {
     return c.noContent(304);
   }
 
-  _pbcnSetCacheHeaders(
+  pbcn.setCacheHeaders(
     c,
     etag,
     "public, max-age=300, s-maxage=600, stale-while-revalidate=30",
@@ -175,13 +118,13 @@ routerAdd("GET", "/api/plugins/trending", function (c) {
   }
 
   var response = { data: data, meta: { total: data.length } };
-  var etag = _pbcnGenerateETag(response);
+  var etag = pbcn.generateETag(response);
 
-  if (_pbcnCheckETag(c, etag)) {
+  if (pbcn.checkETag(c, etag)) {
     return c.noContent(304);
   }
 
-  _pbcnSetCacheHeaders(
+  pbcn.setCacheHeaders(
     c,
     etag,
     "public, max-age=60, s-maxage=300, stale-while-revalidate=15",
@@ -281,15 +224,15 @@ routerAdd("GET", "/api/plugins/list", function (c) {
       nextOffset: offset + data.length,
     },
   };
-  var etag = _pbcnGenerateETag(response);
+  var etag = pbcn.generateETag(response);
 
-  if (_pbcnCheckETag(c, etag)) {
+  if (pbcn.checkETag(c, etag)) {
     return c.noContent(304);
   }
 
   // Use shorter cache for search results, longer for filtered lists
   var cacheAge = q ? 30 : 60;
-  _pbcnSetCacheHeaders(
+  pbcn.setCacheHeaders(
     c,
     etag,
     "public, max-age=" + cacheAge + ", s-maxage=120, stale-while-revalidate=10",
@@ -402,13 +345,13 @@ routerAdd("GET", "/api/plugins/{slug}", function (c) {
       versions: v,
     },
   };
-  var etag = _pbcnGenerateETag(response);
+  var etag = pbcn.generateETag(response);
 
-  if (_pbcnCheckETag(c, etag)) {
+  if (pbcn.checkETag(c, etag)) {
     return c.noContent(304);
   }
 
-  _pbcnSetCacheHeaders(
+  pbcn.setCacheHeaders(
     c,
     etag,
     "public, max-age=120, s-maxage=300, stale-while-revalidate=30",
@@ -692,13 +635,13 @@ routerAdd("GET", "/api/plugins/batch", function (c) {
   } catch (_) {}
 
   var response = { data: plugins };
-  var etag = _pbcnGenerateETag(response);
+  var etag = pbcn.generateETag(response);
 
-  if (_pbcnCheckETag(c, etag)) {
+  if (pbcn.checkETag(c, etag)) {
     return c.noContent(304);
   }
 
-  _pbcnSetCacheHeaders(
+  pbcn.setCacheHeaders(
     c,
     etag,
     "public, max-age=60, s-maxage=300, stale-while-revalidate=15",

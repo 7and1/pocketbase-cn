@@ -1,19 +1,19 @@
 ---
 import BaseLayout from "../../layouts/BaseLayout.astro";
-import { getCollection } from "astro:content";
+import { getCollection, render } from "astro:content";
 import { SITE_URL } from "../../lib/constants/config";
 import TableOfContents from "../../components/blog/TableOfContents.astro";
 
 export async function getStaticPaths() {
   const posts = await getCollection("blog", ({ data }) => !data.draft);
-  return posts.map((post) => ({ params: { slug: post.slug } }));
+  return posts.map((post) => ({ params: { slug: post.id } }));
 }
 
 const { slug } = Astro.params;
 if (!slug) return Astro.redirect("/blog");
 
 const posts = await getCollection("blog", ({ data }) => !data.draft);
-const post = posts.find((p) => p.slug === slug);
+const post = posts.find((p) => p.id === slug);
 
 if (!post) {
   return Astro.redirect("/blog");
@@ -33,7 +33,7 @@ const updatedDate = post.data.updatedDate
     })
   : null;
 
-const { Content, remarkPluginFrontmatter } = await post.render();
+const { Content } = await render(post);
 
 // Get raw content for TOC generation
 const rawContent = post.body;
@@ -50,7 +50,7 @@ const headings = rawContent
   }) || [];
 
 const relatedPosts = posts
-  .filter((p) => p.slug !== slug && !p.data.draft)
+  .filter((p) => p.id !== slug && !p.data.draft)
   .filter((p) =>
     p.data.category === post.data.category ||
     p.data.tags.some((tag) => post.data.tags.includes(tag))
@@ -97,14 +97,6 @@ const jsonLd = {
     dependencies: "PocketBase, Node.js",
   }),
 };
-
-// Log schema data for validation in dev mode
-if (import.meta.env.DEV) {
-  console.log("[Blog Schema]", JSON.stringify(jsonLd, null, 2));
-  if (howToSchema) {
-    console.log("[HowTo Schema]", JSON.stringify(howToSchema, null, 2));
-  }
-}
 
 const howToSchema = isTutorial ? {
   "@context": "https://schema.org",
@@ -329,7 +321,7 @@ const howToSchema = isTutorial ? {
       <div class="mt-4 grid gap-4 md:grid-cols-2">
         {relatedPosts.map((related) => (
           <a
-            href={`/blog/${related.slug}/`}
+            href={`/blog/${related.id}/`}
             class="rounded-xl border border-neutral-200 p-4 transition-colors hover:border-neutral-300 dark:border-neutral-800 dark:hover:border-neutral-700"
           >
             <span class="text-xs text-brand-700 dark:text-brand-300">

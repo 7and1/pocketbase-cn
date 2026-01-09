@@ -25,11 +25,7 @@ vi.mock("../pocketbase/client", () => {
 
 // Import after mock
 import { authToken, authUser, authLoading, initAuth, logout } from "./auth";
-import {
-  pb,
-  __mockAuthStore,
-  __mockAuthRefresh,
-} from "../pocketbase/client";
+import { pb, __mockAuthStore, __mockAuthRefresh } from "../pocketbase/client";
 
 describe("Auth Store", () => {
   beforeEach(() => {

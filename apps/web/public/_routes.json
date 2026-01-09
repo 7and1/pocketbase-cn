@@ -2,10 +2,10 @@
   "version": 1,
   "include": ["/*"],
   "exclude": [
+    "/_astro/*",
     "/favicon.svg",
     "/og-image.png",
     "/robots.txt",
-    "/sw.js",
-    "/_astro/*"
+    "/sw.js"
   ]
 }

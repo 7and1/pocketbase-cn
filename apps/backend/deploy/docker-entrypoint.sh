@@ -19,10 +19,10 @@ if [ -n "${LITESTREAM_ACCESS_KEY_ID}" ] && [ -n "${LITESTREAM_SECRET_ACCESS_KEY}
     fi
 
     # Start PocketBase with Litestream replication
-    exec litestream replicate -config "${LITESTREAM_CONFIG}" -exec "pocketbase serve --http=0.0.0.0:8090 --dir=${POCKETBASE_DIR}"
+    exec litestream replicate -config "${LITESTREAM_CONFIG}" -exec "pocketbase serve --http=0.0.0.0:8090 --dir=${POCKETBASE_DIR} --hooksDir=${POCKETBASE_DIR}/pb_hooks --migrationsDir=${POCKETBASE_DIR}/pb_migrations --publicDir=${POCKETBASE_DIR}/pb_public"
 else
     echo "[entrypoint] Litestream replication disabled (no S3 credentials)"
 
     # Start PocketBase without replication
-    exec pocketbase serve --http=0.0.0.0:8090 --dir="${POCKETBASE_DIR}"
+    exec pocketbase serve --http=0.0.0.0:8090 --dir="${POCKETBASE_DIR}" --hooksDir="${POCKETBASE_DIR}/pb_hooks" --migrationsDir="${POCKETBASE_DIR}/pb_migrations" --publicDir="${POCKETBASE_DIR}/pb_public"
 fi
