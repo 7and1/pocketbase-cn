@@ -6,33 +6,59 @@ interface ShowcaseItem {
   updated?: string | null;
 }
 
+interface ShowcaseResponse {
+  data: ShowcaseItem[];
+  meta?: {
+    hasMore?: boolean;
+    nextOffset?: number;
+    totalItems?: number;
+  };
+}
+
 async function fetchShowcase(): Promise<ShowcaseItem[]> {
   try {
     const out: ShowcaseItem[] = [];
     const limit = 200;
+    const maxConcurrent = 5;
     let offset = 0;
+    let hasMore = true;
 
-    for (let i = 0; i < 200; i++) {
-      const url = new URL("/api/showcase/list", POCKETBASE_URL);
-      url.searchParams.set("limit", String(limit));
-      url.searchParams.set("offset", String(offset));
+    while (hasMore) {
+      const requests: Promise<Response>[] = [];
 
-      const res = await fetch(url.toString(), {
-        headers: { Accept: "application/json" },
-      });
-      if (!res.ok) break;
-      const json = await res.json().catch(() => null);
-      const rows = Array.isArray(json?.data)
-        ? (json.data as ShowcaseItem[])
-        : [];
-      const meta = json?.meta || {};
+      for (let i = 0; i < maxConcurrent && hasMore; i++) {
+        const url = new URL("/api/showcase/list", POCKETBASE_URL);
+        url.searchParams.set("limit", String(limit));
+        url.searchParams.set("offset", String(offset));
+        requests.push(
+          fetch(url.toString(), { headers: { Accept: "application/json" } }),
+        );
+        offset += limit;
+      }
 
-      out.push(...rows);
+      if (requests.length === 0) break;
 
-      const hasMore = Boolean(meta?.hasMore);
-      const nextOffset = Number(meta?.nextOffset || offset + rows.length);
-      if (!hasMore || rows.length === 0) break;
-      offset = nextOffset;
+      const responses = await Promise.allSettled(requests);
+
+      for (const result of responses) {
+        if (result.status === "fulfilled" && result.value.ok) {
+          const json: ShowcaseResponse | null = await result.value
+            .json()
+            .catch(() => null);
+          const rows = Array.isArray(json?.data)
+            ? (json.data as ShowcaseItem[])
+            : [];
+          const meta = json?.meta || {};
+
+          out.push(...rows);
+
+          hasMore = Boolean(meta?.hasMore) && rows.length === limit;
+
+          if (!hasMore) break;
+        }
+      }
+
+      if (out.length === 0) break;
     }
 
     return out;

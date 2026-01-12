@@ -10,7 +10,7 @@ export async function GET() {
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${(() => {
   const posts = blog.sort(
-    (a, b) => b.data.publishDate.valueOf() - a.data.publishDate.valueOf(),
+    (a, b) => +new Date(b.data.publishDate) - +new Date(a.data.publishDate),
   );
 
   const categories = [

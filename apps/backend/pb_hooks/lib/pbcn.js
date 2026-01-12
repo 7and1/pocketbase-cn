@@ -1,3 +1,5 @@
+/// <reference path="../../types.d.ts" />
+
 // Shared helpers for PocketBase.cn hooks/routes.
 // Keep ES5-compatible syntax (Goja).
 

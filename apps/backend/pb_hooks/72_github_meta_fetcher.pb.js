@@ -1,3 +1,5 @@
+/// <reference path="../types.d.ts" />
+
 // Fetch GitHub repository metadata (stars, updated_at) for plugins.
 // Keep ES5-compatible syntax (Goja).
 

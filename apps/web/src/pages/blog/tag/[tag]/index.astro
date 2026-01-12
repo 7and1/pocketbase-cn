@@ -30,11 +30,14 @@ const urlForPage = (pageNum: number) =>
   pageNum <= 1
     ? `/blog/tag/${encodeURIComponent(selectedTag)}/`
     : `/blog/tag/${encodeURIComponent(selectedTag)}/page/${pageNum}/`;
+
+const canonical = new URL(`/blog/tag/${encodeURIComponent(selectedTag)}/`, SITE_URL).toString();
 ---
 
 <BaseLayout
   title={`${selectedTag} - 博客标签 - PocketBase.cn`}
   description={`浏览 PocketBase.cn 博客标签「${selectedTag}」的文章与教程。`}
+  canonical={canonical}
 >
   <Fragment slot="head">
     <link

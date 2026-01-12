@@ -1,0 +1,88 @@
+---
+/**
+ * Breadcrumb navigation component with Schema.org BreadcrumbList markup.
+ * Improves SEO and user navigation.
+ */
+export interface BreadcrumbItem {
+  label: string;
+  href?: string;
+  current?: boolean;
+}
+
+interface Props {
+  items: BreadcrumbItem[];
+}
+
+const { items } = Astro.props;
+
+// Generate Schema.org BreadcrumbList JSON-LD
+const itemListElement = items
+  .map((item, index) => ({
+    "@type": "ListItem",
+    "position": index + 1,
+    "name": item.label,
+    ...(item.href && !item.current
+      ? { "item": new URL(item.href, Astro.site).href }
+      : {}),
+  }))
+  .join(", ");
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  itemListElement: items.map((item, index) => ({
+    "@type": "ListItem",
+    position: index + 1,
+    name: item.label,
+    ...(item.href && !item.current
+      ? { item: new URL(item.href, Astro.site ?? "https://pocketbase.cn").href }
+      : {}),
+  })),
+};
+---
+
+<nav aria-label="面包屑导航" class="mb-4">
+  <ol class="flex flex-wrap items-center gap-1.5 text-sm text-neutral-600 dark:text-neutral-400" itemscope itemtype="https://schema.org/BreadcrumbList">
+    {
+      items.map((item, index) => (
+        <li
+          class="flex items-center gap-1.5"
+          itemprop="itemListElement"
+          itemscope
+          itemtype="https://schema.org/ListItem"
+        >
+          {
+            item.href && !item.current ? (
+              <>
+                <a
+                  href={item.href}
+                  class="hover:text-neutral-900 hover:underline dark:hover:text-neutral-100"
+                  itemprop="item"
+                >
+                  <span itemprop="name">{item.label}</span>
+                </a>
+                <meta itemprop="position" content={String(index + 1)} />
+                <span class="text-neutral-400" aria-hidden="true">/</span>
+              </>
+            ) : (
+              <>
+                <span
+                  class="font-medium text-neutral-900 dark:text-neutral-100"
+                  itemprop="name"
+                  aria-current="page"
+                >
+                  {item.label}
+                </span>
+                <meta itemprop="position" content={String(index + 1)} />
+              </>
+            )
+          }
+        </li>
+      ))
+    }
+  </ol>
+</nav>
+
+<script define:vars={{ jsonLd }} type="application/ld+json">
+  {JSON.stringify(jsonLd)}
+</script>

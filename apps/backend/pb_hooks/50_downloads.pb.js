@@ -1,3 +1,5 @@
+/// <reference path="../types.d.ts" />
+
 // Downloads API routes - all cache/ETag helpers are in lib/pbcn.js
 
 routerAdd("GET", "/api/downloads/versions", function (c) {

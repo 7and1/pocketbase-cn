@@ -1,3 +1,5 @@
+/// <reference path="../../types.d.ts" />
+
 // Security helpers shared across pb_hooks.
 // Keep ES5-compatible syntax (Goja).
 
@@ -46,6 +48,15 @@ function env(key, fallback) {
   return fallback != null ? String(fallback) : "";
 }
 
+var DEFAULT_DEV_CSRF_SECRET =
+  "dev-only-insecure-csrf-secret-please-change-0000000000";
+
+function isDevEnv() {
+  var envName = env("PB_ENV", "");
+  envName = String(envName || "").toLowerCase();
+  return envName === "development" || envName === "dev" || envName === "local";
+}
+
 function hmacSha256(data, secret) {
   // PocketBase exposes `$security` helpers; use the built-in HS256 signer.
   // Signature is stable for the same (data, secret) pair.
@@ -64,6 +75,11 @@ function getCsrfSecret() {
     if (!_csrfSecret || String(_csrfSecret).length < 32) {
       throw new Error(
         "[SECURITY] PB_CSRF_SECRET must be set (32+ chars) to enable CSRF protection",
+      );
+    }
+    if (String(_csrfSecret) === DEFAULT_DEV_CSRF_SECRET && !isDevEnv()) {
+      throw new Error(
+        "[SECURITY] PB_CSRF_SECRET is using the dev default; set a real secret for non-dev environments",
       );
     }
   }
@@ -144,6 +160,18 @@ function validateCsrfToken(token, sessionId) {
     }
   } catch (_) {}
   return String(signature) === String(expectedSig);
+}
+
+// Fail-fast CSRF secret validation on module load
+try {
+  getCsrfSecret();
+  console.log("[SECURITY] CSRF secret validated successfully");
+} catch (err) {
+  console.error(String(err && err.message ? err.message : err));
+  if (!isDevEnv()) {
+    throw err;
+  }
+  console.warn("[SECURITY] Running in dev mode with weak CSRF secret");
 }
 
 module.exports = {

@@ -73,3 +73,15 @@ async function fetchCsrfToken(): Promise<string> {
 }
 
 export const pb = getPocketBase();
+
+// Test exports - only available in test environment
+if (import.meta.env?.MODE === "test" || typeof vi !== "undefined") {
+  try {
+    // @ts-expect-error - test-only exports
+    pb.__mockAuthStore = pbInstance?.authStore;
+    // @ts-expect-error - test-only exports
+    pb.__mockAuthRefresh = pbInstance?.collection("users")?.authRefresh;
+  } catch {
+    // Ignore errors in non-test environments
+  }
+}

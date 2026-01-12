@@ -22,6 +22,7 @@ import {
   createTouchTracker,
   type FormErrors,
 } from "../../lib/utils/formValidation";
+import { ProgressBar } from "../ui/LoadingSpinner";
 
 const schema = pluginSubmitSchema.extend({
   category: z.enum(PLUGIN_CATEGORIES),
@@ -50,10 +51,10 @@ const MAX_SCREENSHOT_SIZE = 2 * 1024 * 1024; // 2MB
 function validateIcon(file: File | null): { valid: boolean; error?: string } {
   if (!file) return { valid: true };
   if (file.size > MAX_ICON_SIZE) {
-    return { valid: false, error: "Icon must be ≤512KB" };
+    return { valid: false, error: "图标必须 ≤512KB" };
   }
   if (!file.type.startsWith("image/")) {
-    return { valid: false, error: "Icon must be an image" };
+    return { valid: false, error: "图标必须是图片" };
   }
   return { valid: true };
 }
@@ -63,17 +64,17 @@ function validateScreenshots(files: File[]): {
   error?: string;
 } {
   if (files.length > 5) {
-    return { valid: false, error: "Maximum 5 screenshots allowed" };
+    return { valid: false, error: "最多允许 5 张截图" };
   }
   for (const f of files) {
     if (f.size > MAX_SCREENSHOT_SIZE) {
       return {
         valid: false,
-        error: `Screenshot "${f.name}" exceeds 2MB limit`,
+        error: `截图 "${f.name}" 超过 2MB 限制`,
       };
     }
     if (!f.type.startsWith("image/")) {
-      return { valid: false, error: `Screenshot "${f.name}" must be an image` };
+      return { valid: false, error: `截图 "${f.name}" 必须是图片` };
     }
   }
   return { valid: true };
@@ -124,6 +125,7 @@ export default function PluginSubmitForm({
   const [changelog, setChangelog] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FormErrors>({});
@@ -280,6 +282,10 @@ export default function PluginSubmitForm({
       : undefined;
   };
 
+  const getFieldErrorId = (fieldName: string) => {
+    return getFieldError(fieldName) ? `${fieldName}-error` : undefined;
+  };
+
   const tagPreview = useMemo(() => parseTags(tags), [tags]);
 
   if (loading) return <p className="text-sm text-neutral-500">加载中…</p>;
@@ -307,6 +313,25 @@ export default function PluginSubmitForm({
         setError(null);
         setOk(null);
         setSubmitting(true);
+        setUploadProgress(0);
+
+        // Simulate upload progress for better UX
+        const hasFiles = icon || screenshots.length > 0;
+        if (hasFiles) {
+          const progressInterval = setInterval(() => {
+            setUploadProgress((prev) => {
+              if (prev >= 90) {
+                clearInterval(progressInterval);
+                return 90;
+              }
+              return prev + 10;
+            });
+          }, 200);
+          // Store interval ID for cleanup
+          (e.currentTarget as HTMLFormElement).dataset.progressInterval =
+            String(progressInterval);
+        }
+
         try {
           // Refresh auth token before submission to ensure valid session
           try {
@@ -323,15 +348,13 @@ export default function PluginSubmitForm({
           // Validate file sizes before submission
           const iconValidation = validateIcon(icon);
           if (!iconValidation.valid) {
-            setError(iconValidation.error || "Icon validation failed");
+            setError(iconValidation.error || "图标验证失败");
             setSubmitting(false);
             return;
           }
           const screenshotsValidation = validateScreenshots(screenshots);
           if (!screenshotsValidation.valid) {
-            setError(
-              screenshotsValidation.error || "Screenshot validation failed",
-            );
+            setError(screenshotsValidation.error || "截图验证失败");
             setSubmitting(false);
             return;
           }
@@ -366,6 +389,7 @@ export default function PluginSubmitForm({
           if (isEditMode) {
             // Update existing plugin
             await pb.collection("plugins").update(initialData.id, form);
+            setUploadProgress(100);
             setOk("更新成功。");
             window.setTimeout(() => {
               window.location.href = `/plugins/${initialData.slug}`;
@@ -401,6 +425,7 @@ export default function PluginSubmitForm({
               });
             }
 
+            setUploadProgress(100);
             setOk("提交成功，已进入审核队列。");
             // Clear draft on successful submission
             clearDraft("plugin", "create");
@@ -423,6 +448,12 @@ export default function PluginSubmitForm({
           }
         } finally {
           setSubmitting(false);
+          // Clear any remaining progress interval
+          const progressInterval = (e.currentTarget as HTMLFormElement).dataset
+            .progressInterval;
+          if (progressInterval) {
+            clearInterval(Number(progressInterval));
+          }
         }
       }}
     >
@@ -430,7 +461,7 @@ export default function PluginSubmitForm({
       {showDraftBanner ? (
         <div className="mb-4 flex items-center justify-between rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-950/30">
           <span className="text-amber-800 dark:text-amber-300">
-            Found a saved draft. Would you like to restore it?
+            发现保存的草稿，是否恢复？
           </span>
           <div className="flex gap-2">
             <button
@@ -438,14 +469,14 @@ export default function PluginSubmitForm({
               onClick={handleClearDraft}
               className="rounded px-2 py-1 text-xs text-amber-700 hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-900/30"
             >
-              Dismiss
+              忽略
             </button>
             <button
               type="button"
               onClick={handleRestoreDraft}
               className="rounded bg-amber-600 px-2 py-1 text-xs text-white hover:bg-amber-700"
             >
-              Restore Draft
+              恢复草稿
             </button>
           </div>
         </div>
@@ -455,6 +486,8 @@ export default function PluginSubmitForm({
         <label className="space-y-1">
           <div className="text-sm font-medium">插件名称</div>
           <input
+            aria-describedby={getFieldErrorId("name")}
+            aria-invalid={Boolean(getFieldError("name"))}
             className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:border-brand-500 dark:bg-neutral-950 ${getFieldError("name") ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-neutral-200 bg-white dark:border-neutral-800"}`}
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -462,7 +495,9 @@ export default function PluginSubmitForm({
             placeholder="例如：PB OSS Storage"
           />
           {getFieldError("name") && (
-            <p className="text-xs text-red-600">{getFieldError("name")}</p>
+            <p id="name-error" className="text-xs text-red-600" role="alert">
+              {getFieldError("name")}
+            </p>
           )}
         </label>
         <label className="space-y-1">
@@ -486,6 +521,8 @@ export default function PluginSubmitForm({
       <label className="mt-4 block space-y-1">
         <div className="text-sm font-medium">简介</div>
         <textarea
+          aria-describedby={getFieldErrorId("description")}
+          aria-invalid={Boolean(getFieldError("description"))}
           className={`min-h-[110px] w-full rounded-md border px-3 py-2 text-sm outline-none focus:border-brand-500 dark:bg-neutral-950 ${getFieldError("description") ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-neutral-200 bg-white dark:border-neutral-800"}`}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
@@ -493,7 +530,13 @@ export default function PluginSubmitForm({
           placeholder="一句话说明这个插件解决什么问题（10-500 字）"
         />
         {getFieldError("description") && (
-          <p className="text-xs text-red-600">{getFieldError("description")}</p>
+          <p
+            id="description-error"
+            className="text-xs text-red-600"
+            role="alert"
+          >
+            {getFieldError("description")}
+          </p>
         )}
       </label>
 
@@ -501,6 +544,8 @@ export default function PluginSubmitForm({
         <label className="space-y-1">
           <div className="text-sm font-medium">仓库地址（GitHub/Gitee）</div>
           <input
+            aria-describedby={getFieldErrorId("repository")}
+            aria-invalid={Boolean(getFieldError("repository"))}
             className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:border-brand-500 dark:bg-neutral-950 ${getFieldError("repository") ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-neutral-200 bg-white dark:border-neutral-800"}`}
             value={repository}
             onChange={(e) => setRepository(e.target.value)}
@@ -508,7 +553,11 @@ export default function PluginSubmitForm({
             placeholder="https://github.com/owner/repo"
           />
           {getFieldError("repository") && (
-            <p className="text-xs text-red-600">
+            <p
+              id="repository-error"
+              className="text-xs text-red-600"
+              role="alert"
+            >
               {getFieldError("repository")}
             </p>
           )}
@@ -516,6 +565,8 @@ export default function PluginSubmitForm({
         <label className="space-y-1">
           <div className="text-sm font-medium">主页（可选）</div>
           <input
+            aria-describedby={getFieldErrorId("homepage")}
+            aria-invalid={Boolean(getFieldError("homepage"))}
             className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:border-brand-500 dark:bg-neutral-950 ${getFieldError("homepage") ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-neutral-200 bg-white dark:border-neutral-800"}`}
             value={homepage}
             onChange={(e) => setHomepage(e.target.value)}
@@ -523,7 +574,13 @@ export default function PluginSubmitForm({
             placeholder="https://example.com"
           />
           {getFieldError("homepage") && (
-            <p className="text-xs text-red-600">{getFieldError("homepage")}</p>
+            <p
+              id="homepage-error"
+              className="text-xs text-red-600"
+              role="alert"
+            >
+              {getFieldError("homepage")}
+            </p>
           )}
         </label>
       </div>
@@ -594,7 +651,7 @@ export default function PluginSubmitForm({
         </p>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <label className="space-y-1">
-            <div className="text-sm font-medium">Version</div>
+            <div className="text-sm font-medium">版本号</div>
             <input
               className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950"
               value={version}
@@ -603,7 +660,7 @@ export default function PluginSubmitForm({
             />
           </label>
           <label className="space-y-1">
-            <div className="text-sm font-medium">PocketBase Version</div>
+            <div className="text-sm font-medium">兼容 PocketBase 版本</div>
             <input
               className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950"
               value={pocketbaseVersion}
@@ -613,7 +670,7 @@ export default function PluginSubmitForm({
           </label>
         </div>
         <label className="mt-4 block space-y-1">
-          <div className="text-sm font-medium">Download URL</div>
+          <div className="text-sm font-medium">下载地址 URL</div>
           <input
             className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950"
             value={downloadUrl}
@@ -622,7 +679,7 @@ export default function PluginSubmitForm({
           />
         </label>
         <label className="mt-4 block space-y-1">
-          <div className="text-sm font-medium">Changelog（可选）</div>
+          <div className="text-sm font-medium">更新日志（可选）</div>
           <textarea
             className="min-h-[90px] w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-950"
             value={changelog}
@@ -632,8 +689,24 @@ export default function PluginSubmitForm({
         </label>
       </div>
 
-      {error ? <p className="mt-5 text-sm text-red-600">{error}</p> : null}
-      {ok ? <p className="mt-5 text-sm text-green-700">{ok}</p> : null}
+      {error ? (
+        <p className="mt-5 text-sm text-red-600" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {ok ? (
+        <p className="mt-5 text-sm text-green-700" role="status">
+          {ok}
+        </p>
+      ) : null}
+
+      {submitting && uploadProgress > 0 ? (
+        <ProgressBar
+          progress={uploadProgress}
+          label="上传中..."
+          className="mt-4"
+        />
+      ) : null}
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <button

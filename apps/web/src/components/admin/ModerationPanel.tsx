@@ -227,7 +227,7 @@ export default function ModerationPanel() {
                   className="min-h-[44px] rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-950"
                   onClick={() => setStatus("comments", c.id, "spam")}
                 >
-                  Spam
+                  垃圾信息
                 </button>
               </div>
             </div>

@@ -132,7 +132,7 @@ function ShowcaseBrowserContent({
       <MobileFilterDrawer
         open={filterDrawerOpen}
         onClose={() => setFilterDrawerOpen(false)}
-        categories={SHOWCASE_CATEGORIES}
+        categories={[...SHOWCASE_CATEGORIES]}
         category={category}
         onCategoryChange={setCategory}
         sortOptions={SHOWCASE_SORT_OPTIONS}

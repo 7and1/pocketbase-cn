@@ -35,8 +35,8 @@ export default defineConfig({
     starlight({
       title: "PocketBase.cn",
       description: "PocketBase 中文文档、插件市场、案例展示与下载镜像",
-      prerender: false, // Use SSR mode for Cloudflare Workers
-      pagefind: false, // Disable pagefind (incompatible with SSR)
+      prerender: true, // Pre-render docs; dynamic pages opt-in to SSR via `prerender = false`
+      pagefind: false, // Keep disabled until search UI is re-enabled
       disable404Route: true,
       defaultLocale: "root",
       locales: {

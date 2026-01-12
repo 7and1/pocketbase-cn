@@ -88,9 +88,7 @@ function bytes(n?: number) {
 }
 
 const OFFICIAL_RELEASE_PREFIX =
-  "https://github.com/" +
-  "pocketbase/pocketbase/" +
-  "releases/download/";
+  "https://github.com/" + "pocketbase/pocketbase/" + "releases/download/";
 
 function officialDownloadUrl(file: DownloadFile) {
   if (!file.version || !file.platform || !file.arch) return "";
@@ -219,10 +217,12 @@ function DownloadsBrowserContent({ initial }: { initial?: InitialDownloads }) {
     }
   };
 
-  const recommendedFallback = recommended ? officialDownloadUrl(recommended) : "";
+  const recommendedFallback = recommended
+    ? officialDownloadUrl(recommended)
+    : "";
   const showRecommendedFallback = Boolean(
     recommendedFallback &&
-      (!recommended?.url || !isOfficialDownloadUrl(recommended.url)),
+    (!recommended?.url || !isOfficialDownloadUrl(recommended.url)),
   );
 
   return (
@@ -356,8 +356,7 @@ function DownloadsBrowserContent({ initial }: { initial?: InitialDownloads }) {
                 {files.map((f) => {
                   const fallbackUrl = officialDownloadUrl(f);
                   const showFallback = Boolean(
-                    fallbackUrl &&
-                      (!f.url || !isOfficialDownloadUrl(f.url)),
+                    fallbackUrl && (!f.url || !isOfficialDownloadUrl(f.url)),
                   );
 
                   return (
@@ -385,7 +384,9 @@ function DownloadsBrowserContent({ initial }: { initial?: InitialDownloads }) {
                               onClick={() => copyChecksum(f.checksum!)}
                               aria-label={`复制校验值 ${f.checksum.slice(0, 12)}`}
                             >
-                              {copiedChecksum === f.checksum ? "已复制" : "复制"}
+                              {copiedChecksum === f.checksum
+                                ? "已复制"
+                                : "复制"}
                             </button>
                           </span>
                         ) : (
@@ -482,7 +483,9 @@ function DownloadsBrowserContent({ initial }: { initial?: InitialDownloads }) {
                               onClick={() => copyChecksum(f.checksum!)}
                               aria-label={`复制校验值 ${f.checksum.slice(0, 12)}`}
                             >
-                              {copiedChecksum === f.checksum ? "已复制" : "复制"}
+                              {copiedChecksum === f.checksum
+                                ? "已复制"
+                                : "复制"}
                             </button>
                           </span>
                         ) : (

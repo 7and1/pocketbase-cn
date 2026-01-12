@@ -17,6 +17,11 @@ if [[ -f "$PB_ROOT_DIR/.env" ]]; then
   set +a
 fi
 
+# Default to development environment for local runs.
+if [[ -z "${PB_ENV:-}" ]]; then
+  export PB_ENV="development"
+fi
+
 # Dev defaults (safe for local only).
 if [[ -z "${PB_CORS_ORIGINS:-}" ]]; then
   export PB_CORS_ORIGINS="http://127.0.0.1:4321,http://localhost:4321"

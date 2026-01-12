@@ -16,11 +16,14 @@ for (const post of allPosts) {
 const tags = Array.from(counts.entries())
   .sort((a, b) => b[1] - a[1])
   .map(([name, count]) => ({ name, count }));
+
+const canonical = new URL("/blog/tags/", SITE_URL).toString();
 ---
 
 <BaseLayout
   title="博客标签 - PocketBase.cn"
   description="按标签浏览 PocketBase.cn 的博客文章。"
+  canonical={canonical}
 >
   <Fragment slot="head">
     <link

@@ -83,3 +83,41 @@ export function InlineLoader({ message }: InlineLoaderProps) {
     </div>
   );
 }
+
+interface ProgressBarProps {
+  progress: number;
+  label?: string;
+  className?: string;
+}
+
+export function ProgressBar({ progress, label, className }: ProgressBarProps) {
+  const clampedProgress = Math.min(100, Math.max(0, progress));
+
+  return (
+    <div className={cn("space-y-1", className)}>
+      {label && (
+        <div className="flex justify-between text-xs">
+          <span className="text-neutral-600 dark:text-neutral-400">
+            {label}
+          </span>
+          <span className="text-neutral-600 dark:text-neutral-400">
+            {Math.round(clampedProgress)}%
+          </span>
+        </div>
+      )}
+      <div
+        className="h-2 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800"
+        role="progressbar"
+        aria-valuenow={clampedProgress}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={label || "Upload progress"}
+      >
+        <div
+          className="h-full bg-brand-600 transition-all duration-300 ease-out"
+          style={{ width: `${clampedProgress}%` }}
+        />
+      </div>
+    </div>
+  );
+}

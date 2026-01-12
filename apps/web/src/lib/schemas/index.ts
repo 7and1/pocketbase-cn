@@ -14,7 +14,12 @@ export type { UserRole } from "../types/user";
 export const nonEmptyStringSchema = z.string().trim().min(1);
 export const urlSchema = z.string().url();
 export const optionalUrlSchema = urlSchema.optional().or(z.literal(""));
-export const slugSchema = z.string().regex(/^[a-z0-9-]+$/);
+export const slugSchema = z
+  .string()
+  .regex(
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+    "Slug must contain only lowercase letters, numbers, and single hyphens between them",
+  );
 
 // User schemas
 export const userRoleSchema = z.enum([

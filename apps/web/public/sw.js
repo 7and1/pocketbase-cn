@@ -9,9 +9,9 @@ const PRECACHE_ASSETS = ["/", "/favicon.svg", "/og-image.png"];
 
 // API endpoints that can be cached (with short TTL)
 const CACHEABLE_PATTERNS = [
-  /^\/api\/plugins\/list/,
-  /^\/api\/showcase\/list/,
-  /^\/api\/downloads\/versions/,
+  /^\/api\/plugins/,
+  /^\/api\/showcase/,
+  /^\/api\/downloads/,
 ];
 
 // Static asset patterns

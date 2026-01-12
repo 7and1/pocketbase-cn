@@ -161,7 +161,8 @@ describe("PocketBase Client", () => {
       const pb = getPocketBase();
 
       // Get the onChange callback
-      const onChangeCb = pb.authStore.onChange.mock.calls[0]?.[0];
+      const onChangeCalls = (pb.authStore.onChange as any).mock?.calls || [];
+      const onChangeCb = onChangeCalls[0]?.[0];
       if (onChangeCb) {
         onChangeCb();
 
@@ -182,7 +183,8 @@ describe("PocketBase Client", () => {
       const { getPocketBase } = await import("./client");
       const pb = getPocketBase();
 
-      const onChangeCb = pb.authStore.onChange.mock.calls[0]?.[0];
+      const onChangeCalls = (pb.authStore.onChange as any).mock?.calls || [];
+      const onChangeCb = onChangeCalls[0]?.[0];
       if (onChangeCb) {
         onChangeCb();
 
@@ -207,7 +209,8 @@ describe("PocketBase Client", () => {
 
       expect(pb.authStore.onChange).toHaveBeenCalled();
 
-      const onChangeCb = pb.authStore.onChange.mock.calls[0]?.[0];
+      const onChangeCalls = (pb.authStore.onChange as any).mock?.calls || [];
+      const onChangeCb = onChangeCalls[0]?.[0];
       if (onChangeCb) {
         onChangeCb();
 

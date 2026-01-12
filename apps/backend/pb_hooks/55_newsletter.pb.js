@@ -1,3 +1,5 @@
+/// <reference path="../types.d.ts" />
+
 routerAdd("POST", "/api/newsletter/subscribe", function (c) {
   var pbcn = require(__hooks + "/lib/pbcn.js");
 

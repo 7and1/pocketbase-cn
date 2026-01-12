@@ -132,7 +132,7 @@ function PluginsBrowserContent({
       <MobileFilterDrawer
         open={filterDrawerOpen}
         onClose={() => setFilterDrawerOpen(false)}
-        categories={PLUGIN_CATEGORIES}
+        categories={[...PLUGIN_CATEGORIES]}
         category={category}
         onCategoryChange={setCategory}
         sortOptions={PLUGIN_SORT_OPTIONS}

@@ -135,3 +135,24 @@ export function TableSkeleton({ rows = 5, columns = 4 }: TableSkeletonProps) {
     </>
   );
 }
+
+interface ListSkeletonProps {
+  count?: number;
+}
+
+export function ListSkeleton({ count = 5 }: ListSkeletonProps) {
+  return (
+    <div className="space-y-3">
+      {Array.from({ length: count }).map((_, i) => (
+        <div
+          key={i}
+          className="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950"
+        >
+          <Skeleton variant="text" width={180} className="mb-2" />
+          <Skeleton variant="text" className="mb-1" />
+          <Skeleton variant="text" width="80%" />
+        </div>
+      ))}
+    </div>
+  );
+}

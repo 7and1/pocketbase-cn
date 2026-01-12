@@ -1,3 +1,5 @@
+/// <reference path="../types.d.ts" />
+
 // Moderation/ownership guards for writable collections.
 // Keep ES5-compatible syntax (Goja).
 

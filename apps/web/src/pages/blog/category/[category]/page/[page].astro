@@ -45,11 +45,14 @@ const urlForPage = (pageNum: number) =>
   pageNum <= 1
     ? `/blog/category/${encodeURIComponent(selectedCategory)}/`
     : `/blog/category/${encodeURIComponent(selectedCategory)}/page/${pageNum}/`;
+
+const canonical = new URL(`/blog/category/${encodeURIComponent(selectedCategory)}/page/${safePage}/`, SITE_URL).toString();
 ---
 
 <BaseLayout
   title={`${selectedCategory} - 第 ${safePage} 页 - 博客分类 - PocketBase.cn`}
   description={`浏览 PocketBase.cn 博客分类「${selectedCategory}」的文章与教程。`}
+  canonical={canonical}
 >
   <Fragment slot="head">
     <link

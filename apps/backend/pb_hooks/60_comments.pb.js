@@ -1,3 +1,5 @@
+/// <reference path="../types.d.ts" />
+
 onRecordCreateRequest(function (e) {
   var pbcn = require(__hooks + "/lib/pbcn.js");
 

@@ -1,6 +1,8 @@
 ---
 title: 反向代理（Reverse Proxy）
 description: 使用 Nginx/Caddy 为 PocketBase 配置反向代理、WebSocket、上传与安全头
+updatedDate: 2025-01-12
+difficulty: intermediate
 ---
 
 PocketBase 生产环境通常会把 **PocketBase 进程** 放在内网端口（如 `127.0.0.1:8090`），再用 **反向代理**（Nginx/Caddy）对外提供 HTTPS、压缩、限流与日志。

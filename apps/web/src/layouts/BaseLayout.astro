@@ -267,6 +267,14 @@ if (import.meta.env.DEV) {
     <link rel="icon" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/favicon.svg" />
 
+    <!-- RSS Feed Discovery -->
+    <link
+      rel="alternate"
+      type="application/rss+xml"
+      title="PocketBase.cn 博客"
+      href={`${SITE_URL}/blog/rss.xml`}
+    />
+
     <slot name="head" />
 
     <!-- Preconnect to API origin for faster resource loading -->

@@ -1,3 +1,5 @@
+/// <reference path="../types.d.ts" />
+
 routerAdd(
   "POST",
   "/api/me/delete",

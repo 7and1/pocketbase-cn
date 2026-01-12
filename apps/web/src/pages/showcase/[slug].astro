@@ -2,7 +2,7 @@
 export const prerender = false;
 
 import BaseLayout from "../../layouts/BaseLayout.astro";
-import { POCKETBASE_URL } from "../../lib/constants/config";
+import { POCKETBASE_URL, SITE_URL } from "../../lib/constants/config";
 import { sanitizeRichHtml } from "../../lib/utils/sanitize";
 import VoteButton from "../../components/showcase/VoteButton";
 import CommentsThread from "../../components/comments/CommentsThread";
@@ -57,11 +57,14 @@ Astro.response.headers.set(
 if (import.meta.env.DEV) {
   console.log("[Showcase Schema]", JSON.stringify(showcaseSchemaData, null, 2));
 }
+
+const canonical = new URL(`/showcase/${slug}/`, SITE_URL).toString();
 ---
 
 <BaseLayout
   title={`${item?.title || slug} - 案例 - PocketBase.cn`}
   description={item?.description || ""}
+  canonical={canonical}
   schemaType="CreativeWork"
   schemaData={showcaseSchemaData}
   ogImage={ogImage}

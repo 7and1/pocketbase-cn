@@ -152,7 +152,7 @@ export default function MobileNav({ currentPath = "" }: MobileNavProps) {
         className="inline-flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-neutral-200 bg-white text-neutral-700 transition-colors hover:bg-neutral-50 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-300 dark:hover:bg-neutral-900"
         aria-expanded={isOpen}
         aria-controls="mobile-nav-menu"
-        aria-label={isOpen ? "Close navigation menu" : "Open navigation menu"}
+        aria-label={isOpen ? "关闭导航菜单" : "打开导航菜单"}
       >
         {isOpen ? (
           <svg
@@ -207,7 +207,7 @@ export default function MobileNav({ currentPath = "" }: MobileNavProps) {
         )}
         role="dialog"
         aria-modal="true"
-        aria-label="Navigation menu"
+        aria-label="导航菜单"
         style={{ touchAction: "pan-y" }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -216,13 +216,13 @@ export default function MobileNav({ currentPath = "" }: MobileNavProps) {
         {/* Close button inside menu */}
         <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-4 dark:border-neutral-800">
           <span className="font-semibold text-neutral-900 dark:text-neutral-100">
-            Menu
+            菜单
           </span>
           <button
             type="button"
             onClick={closeMenu}
             className="inline-flex h-9 w-9 min-h-[36px] min-w-[36px] items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:hover:bg-neutral-900 dark:hover:text-neutral-300"
-            aria-label="Close navigation menu"
+            aria-label="关闭导航菜单"
           >
             <svg
               className="h-5 w-5"
@@ -242,7 +242,7 @@ export default function MobileNav({ currentPath = "" }: MobileNavProps) {
         </div>
 
         {/* Navigation Links */}
-        <nav className="px-2 py-4" aria-label="Mobile navigation">
+        <nav className="px-2 py-4" aria-label="移动端导航">
           <ul className="space-y-1">
             {navItems.map((item, index) => (
               <li key={item.href}>

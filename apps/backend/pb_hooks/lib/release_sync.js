@@ -1,3 +1,5 @@
+/// <reference path="../../types.d.ts" />
+
 function githubHeaders() {
   var headers = {
     Accept: "application/vnd.github+json",

@@ -1,3 +1,5 @@
+/// <reference path="../types.d.ts" />
+
 // PocketBase releases sync + notifications.
 // Keep the route/cron callbacks self-contained (JSVM handlers are isolated).
 

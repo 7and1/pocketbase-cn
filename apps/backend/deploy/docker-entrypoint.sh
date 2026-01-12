@@ -3,9 +3,34 @@ set -e
 
 # PocketBase.cn Docker Entrypoint
 # Starts PocketBase with Litestream replication if configured
+#
+# Note: Response compression (gzip/brotli) should be handled by the
+# reverse proxy (nginx/cloudflare) in front of PocketBase. The Go
+# standard library's http.Server does not provide built-in compression.
 
 POCKETBASE_DIR="/opt/pocketbase"
 LITESTREAM_CONFIG="/etc/litestream.yml"
+DEFAULT_DEV_CSRF_SECRET="dev-only-insecure-csrf-secret-please-change-0000000000"
+
+# Refuse to start with the dev CSRF secret outside local dev.
+case "${PB_ENV:-}" in
+  development|dev|local)
+    ;;
+  *)
+    if [ -z "${PB_CSRF_SECRET:-}" ]; then
+      echo "[entrypoint] ERROR: PB_CSRF_SECRET is required (32+ chars) in non-dev environments"
+      exit 1
+    fi
+    if [ "${PB_CSRF_SECRET}" = "${DEFAULT_DEV_CSRF_SECRET}" ]; then
+      echo "[entrypoint] ERROR: PB_CSRF_SECRET is set to the dev default; set a real secret"
+      exit 1
+    fi
+    if [ "${#PB_CSRF_SECRET}" -lt 32 ]; then
+      echo "[entrypoint] ERROR: PB_CSRF_SECRET must be at least 32 characters"
+      exit 1
+    fi
+    ;;
+esac
 
 # Check if Litestream is configured (S3 credentials present)
 if [ -n "${LITESTREAM_ACCESS_KEY_ID}" ] && [ -n "${LITESTREAM_SECRET_ACCESS_KEY}" ]; then

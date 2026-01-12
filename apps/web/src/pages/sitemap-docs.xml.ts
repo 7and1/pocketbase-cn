@@ -19,7 +19,7 @@ export async function GET() {
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${docs
   .map(
-    (doc) => `  <url>
+    (doc: { id: string }) => `  <url>
     <loc>${SITE_URL}${routeForId(doc.id)}</loc>
     <lastmod>${now}</lastmod>
     <changefreq>weekly</changefreq>

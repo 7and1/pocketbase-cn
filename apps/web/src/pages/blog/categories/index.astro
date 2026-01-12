@@ -13,11 +13,14 @@ for (const post of allPosts) {
 const categories = Array.from(counts.entries())
   .sort((a, b) => b[1] - a[1])
   .map(([name, count]) => ({ name, count }));
+
+const canonical = new URL("/blog/categories/", SITE_URL).toString();
 ---
 
 <BaseLayout
   title="博客分类 - PocketBase.cn"
   description="按分类浏览 PocketBase.cn 的博客文章。"
+  canonical={canonical}
 >
   <Fragment slot="head">
     <link

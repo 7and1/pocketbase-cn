@@ -31,11 +31,13 @@ const categories = [...new Set(allPosts.map((p) => p.data.category))];
 const tags = [...new Set(allPosts.flatMap((p) => p.data.tags))];
 
 const urlForPage = (pageNum: number) => (pageNum <= 1 ? "/blog/" : `/blog/page/${pageNum}/`);
+const canonical = new URL(`/blog/page/${safePage}/`, SITE_URL).toString();
 ---
 
 <BaseLayout
   title={`博客 - 第 ${safePage} 页 - PocketBase.cn`}
   description="PocketBase 技术文章、教程、最佳实践与对比分析。"
+  canonical={canonical}
 >
   <Fragment slot="head">
     <link

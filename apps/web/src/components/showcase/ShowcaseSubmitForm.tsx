@@ -22,6 +22,7 @@ import {
   type FormErrors,
 } from "../../lib/utils/formValidation";
 import { MarkdownEditor } from "../ui/MarkdownPreview";
+import { ProgressBar } from "../ui/LoadingSpinner";
 
 const schema = showcaseSubmitSchema.extend({
   category: z.enum(SHOWCASE_CATEGORIES),
@@ -84,6 +85,7 @@ export default function ShowcaseSubmitForm({
   const [screenshots, setScreenshots] = useState<File[]>([]);
 
   const [submitting, setSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FormErrors>({});
@@ -206,6 +208,10 @@ export default function ShowcaseSubmitForm({
       : undefined;
   };
 
+  const getFieldErrorId = (fieldName: string) => {
+    return getFieldError(fieldName) ? `${fieldName}-error` : undefined;
+  };
+
   const tagPreview = useMemo(() => parseTags(tags), [tags]);
 
   if (loading) return <p className="text-sm text-neutral-500">加载中…</p>;
@@ -233,6 +239,25 @@ export default function ShowcaseSubmitForm({
         setError(null);
         setOk(null);
         setSubmitting(true);
+        setUploadProgress(0);
+
+        // Simulate upload progress for better UX
+        const hasFiles = thumbnail || screenshots.length > 0;
+        if (hasFiles) {
+          const progressInterval = setInterval(() => {
+            setUploadProgress((prev) => {
+              if (prev >= 90) {
+                clearInterval(progressInterval);
+                return 90;
+              }
+              return prev + 10;
+            });
+          }, 200);
+          // Store interval ID for cleanup
+          (e.currentTarget as HTMLFormElement).dataset.progressInterval =
+            String(progressInterval);
+        }
+
         try {
           // Refresh auth token before submission to ensure valid session
           try {
@@ -272,6 +297,7 @@ export default function ShowcaseSubmitForm({
           if (isEditMode) {
             // Update existing showcase
             await pb.collection("showcase").update(initialData.id, form);
+            setUploadProgress(100);
             setOk("更新成功。");
             window.setTimeout(() => {
               window.location.href = `/showcase/${initialData.slug}`;
@@ -281,6 +307,7 @@ export default function ShowcaseSubmitForm({
             const newSlug = slugify(parsed.title);
             form.set("slug", newSlug);
             await pb.collection("showcase").create(form);
+            setUploadProgress(100);
             setOk("提交成功，已进入审核队列。");
             // Clear draft on successful submission
             clearDraft("showcase", "create");
@@ -303,6 +330,12 @@ export default function ShowcaseSubmitForm({
           }
         } finally {
           setSubmitting(false);
+          // Clear any remaining progress interval
+          const progressInterval = (e.currentTarget as HTMLFormElement).dataset
+            .progressInterval;
+          if (progressInterval) {
+            clearInterval(Number(progressInterval));
+          }
         }
       }}
     >
@@ -310,7 +343,7 @@ export default function ShowcaseSubmitForm({
       {showDraftBanner ? (
         <div className="mb-4 flex items-center justify-between rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-950/30">
           <span className="text-amber-800 dark:text-amber-300">
-            Found a saved draft. Would you like to restore it?
+            发现保存的草稿，是否恢复？
           </span>
           <div className="flex gap-2">
             <button
@@ -318,14 +351,14 @@ export default function ShowcaseSubmitForm({
               onClick={handleClearDraft}
               className="rounded px-2 py-1 text-xs text-amber-700 hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-900/30"
             >
-              Dismiss
+              忽略
             </button>
             <button
               type="button"
               onClick={handleRestoreDraft}
               className="rounded bg-amber-600 px-2 py-1 text-xs text-white hover:bg-amber-700"
             >
-              Restore Draft
+              恢复草稿
             </button>
           </div>
         </div>
@@ -335,6 +368,8 @@ export default function ShowcaseSubmitForm({
         <label className="space-y-1">
           <div className="text-sm font-medium">标题</div>
           <input
+            aria-describedby={getFieldErrorId("title")}
+            aria-invalid={Boolean(getFieldError("title"))}
             className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:border-brand-500 dark:bg-neutral-950 ${getFieldError("title") ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-neutral-200 bg-white dark:border-neutral-800"}`}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -342,7 +377,9 @@ export default function ShowcaseSubmitForm({
             placeholder="例如：PocketBase + Astro 作品集"
           />
           {getFieldError("title") && (
-            <p className="text-xs text-red-600">{getFieldError("title")}</p>
+            <p id="title-error" className="text-xs text-red-600" role="alert">
+              {getFieldError("title")}
+            </p>
           )}
         </label>
         <label className="space-y-1">
@@ -368,6 +405,8 @@ export default function ShowcaseSubmitForm({
       <label className="mt-4 block space-y-1">
         <div className="text-sm font-medium">简介</div>
         <textarea
+          aria-describedby={getFieldErrorId("description")}
+          aria-invalid={Boolean(getFieldError("description"))}
           className={`min-h-[110px] w-full rounded-md border px-3 py-2 text-sm outline-none focus:border-brand-500 dark:bg-neutral-950 ${getFieldError("description") ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-neutral-200 bg-white dark:border-neutral-800"}`}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
@@ -375,7 +414,13 @@ export default function ShowcaseSubmitForm({
           placeholder="说明这个项目做什么、为什么值得参考（10-1000 字）"
         />
         {getFieldError("description") && (
-          <p className="text-xs text-red-600">{getFieldError("description")}</p>
+          <p
+            id="description-error"
+            className="text-xs text-red-600"
+            role="alert"
+          >
+            {getFieldError("description")}
+          </p>
         )}
       </label>
 
@@ -383,6 +428,8 @@ export default function ShowcaseSubmitForm({
         <label className="space-y-1">
           <div className="text-sm font-medium">项目地址</div>
           <input
+            aria-describedby={getFieldErrorId("url")}
+            aria-invalid={Boolean(getFieldError("url"))}
             className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:border-brand-500 dark:bg-neutral-950 ${getFieldError("url") ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-neutral-200 bg-white dark:border-neutral-800"}`}
             value={url}
             onChange={(e) => setUrl(e.target.value)}
@@ -390,12 +437,16 @@ export default function ShowcaseSubmitForm({
             placeholder="https://example.com"
           />
           {getFieldError("url") && (
-            <p className="text-xs text-red-600">{getFieldError("url")}</p>
+            <p id="url-error" className="text-xs text-red-600" role="alert">
+              {getFieldError("url")}
+            </p>
           )}
         </label>
         <label className="space-y-1">
           <div className="text-sm font-medium">仓库地址（可选）</div>
           <input
+            aria-describedby={getFieldErrorId("repository")}
+            aria-invalid={Boolean(getFieldError("repository"))}
             className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:border-brand-500 dark:bg-neutral-950 ${getFieldError("repository") ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-neutral-200 bg-white dark:border-neutral-800"}`}
             value={repository}
             onChange={(e) => setRepository(e.target.value)}
@@ -403,7 +454,11 @@ export default function ShowcaseSubmitForm({
             placeholder="https://github.com/owner/repo"
           />
           {getFieldError("repository") && (
-            <p className="text-xs text-red-600">
+            <p
+              id="repository-error"
+              className="text-xs text-red-600"
+              role="alert"
+            >
               {getFieldError("repository")}
             </p>
           )}
@@ -467,8 +522,24 @@ export default function ShowcaseSubmitForm({
         </label>
       </div>
 
-      {error ? <p className="mt-5 text-sm text-red-600">{error}</p> : null}
-      {ok ? <p className="mt-5 text-sm text-green-700">{ok}</p> : null}
+      {error ? (
+        <p className="mt-5 text-sm text-red-600" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {ok ? (
+        <p className="mt-5 text-sm text-green-700" role="status">
+          {ok}
+        </p>
+      ) : null}
+
+      {submitting && uploadProgress > 0 ? (
+        <ProgressBar
+          progress={uploadProgress}
+          label="上传中..."
+          className="mt-4"
+        />
+      ) : null}
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <button

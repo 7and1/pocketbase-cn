@@ -2,7 +2,7 @@
 export const prerender = false;
 
 import BaseLayout from "../../layouts/BaseLayout.astro";
-import { POCKETBASE_URL } from "../../lib/constants/config";
+import { POCKETBASE_URL, SITE_URL } from "../../lib/constants/config";
 import { renderMarkdownSafe } from "../../lib/utils/markdown";
 import StarButton from "../../components/plugins/StarButton";
 import CommentsThread from "../../components/comments/CommentsThread";
@@ -88,11 +88,14 @@ Astro.response.headers.set(
 if (import.meta.env.DEV) {
   console.log("[Plugin Schema]", JSON.stringify(pluginSchemaData, null, 2));
 }
+
+const canonical = new URL(`/plugins/${slug}/`, SITE_URL).toString();
 ---
 
 <BaseLayout
   title={`${plugin?.name || slug} - 插件 - PocketBase.cn`}
   description={plugin?.description || ""}
+  canonical={canonical}
   schemaType="SoftwareSourceCode"
   schemaData={pluginSchemaData}
   ogImage={ogImage}

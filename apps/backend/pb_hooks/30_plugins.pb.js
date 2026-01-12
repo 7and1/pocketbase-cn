@@ -1,3 +1,5 @@
+/// <reference path="../types.d.ts" />
+
 // Plugins API routes - all cache/ETag helpers are in lib/pbcn.js
 
 routerAdd("GET", "/api/plugins/featured", function (c) {
@@ -369,6 +371,20 @@ routerAdd(
     if (!authRecord) {
       return c.json(401, {
         error: { code: "UNAUTHORIZED", message: "Authentication required" },
+      });
+    }
+
+    // Rate limiting: 30 stars per minute per user
+    if (
+      !pbcn.rateLimitAllow({
+        id: "plugin_star",
+        windowSec: 60,
+        max: 30,
+        key: authRecord.id,
+      })
+    ) {
+      return c.json(429, {
+        error: { code: "RATE_LIMITED", message: "Too many requests" },
       });
     }
 

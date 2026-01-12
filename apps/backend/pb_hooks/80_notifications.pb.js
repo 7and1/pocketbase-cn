@@ -1,3 +1,5 @@
+/// <reference path="../types.d.ts" />
+
 // User notification system for plugin/showcase status changes.
 // Sends email notifications via Resend when items are approved or rejected.
 // Keep ES5-compatible syntax (Goja).

@@ -29,7 +29,7 @@ export default function LoginPanel() {
           className={`flex min-h-[44px] flex-1 rounded-md px-3 py-3 text-sm font-medium sm:py-2 ${mode === "github" ? "bg-brand-600 text-white hover:bg-brand-700" : "border border-neutral-200 bg-white hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950 dark:hover:bg-neutral-900"}`}
           onClick={() => setMode("github")}
         >
-          GitHub OAuth
+          GitHub 登录
         </button>
         {enablePasswordLogin ? (
           <button

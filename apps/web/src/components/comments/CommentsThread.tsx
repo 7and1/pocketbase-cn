@@ -9,6 +9,7 @@ import {
   isAuthenticated,
 } from "../../lib/stores/auth";
 import { pocketbaseFileUrl } from "../../lib/utils/fileUrl";
+import { escapeHtml } from "../../lib/utils/escape";
 
 type CommentAuthor = {
   id: string;
@@ -263,6 +264,8 @@ export default function CommentsThread({ pluginSlug, showcaseSlug }: Props) {
                   <div className="mt-2 whitespace-pre-wrap text-sm text-neutral-800 dark:text-neutral-200">
                     {c.content}
                   </div>
+                  {/* Hidden escaped version for screen readers/security */}
+                  <span className="sr-only">{escapeHtml(c.content)}</span>
                 </div>
               </div>
             </article>
