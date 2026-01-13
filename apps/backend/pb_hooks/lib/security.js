@@ -125,10 +125,28 @@ function getSessionId(ctx) {
   return "anon:" + String(ip);
 }
 
-function generateCsrfToken(sessionId) {
+// Token rotation: store last valid timestamp per session
+var _lastTokenTimestamps = {};
+
+function generateCsrfToken(sessionId, rotate) {
   if (!sessionId) return null;
   var secret = getCsrfSecret();
   var timestamp = Date.now();
+
+  // Force rotation if requested, otherwise reuse if within window
+  if (rotate || !_lastTokenTimestamps[sessionId]) {
+    _lastTokenTimestamps[sessionId] = timestamp;
+  } else {
+    // Check if we need rotation (tokens older than 1 hour)
+    var lastTs = _lastTokenTimestamps[sessionId];
+    var rotationWindow = 60 * 60 * 1000; // 1 hour
+    if (timestamp - lastTs > rotationWindow) {
+      _lastTokenTimestamps[sessionId] = timestamp;
+    } else {
+      timestamp = lastTs;
+    }
+  }
+
   var data = String(sessionId) + ":" + String(timestamp);
   var signature = hmacSha256(data, secret);
   return data + ":" + String(signature);
@@ -162,6 +180,32 @@ function validateCsrfToken(token, sessionId) {
   return String(signature) === String(expectedSig);
 }
 
+// Check if token should be rotated (based on age)
+function shouldRotateCsrfToken(token) {
+  if (!token) return true;
+  var parts = String(token).split(":");
+  if (parts.length !== 3) return true;
+
+  var timestamp = parseInt(parts[1], 10);
+  if (!timestamp) return true;
+
+  var now = Date.now();
+  var rotationWindow = 60 * 60 * 1000; // 1 hour
+  return now - timestamp > rotationWindow;
+}
+
+// Get CSRF token and set it as response header
+function setCsrfTokenHeader(c, sessionId) {
+  if (!c || !c.response || !c.response.header) return null;
+  try {
+    var token = generateCsrfToken(sessionId, false);
+    c.response.header().set("X-CSRF-Token", token);
+    return token;
+  } catch (_) {
+    return null;
+  }
+}
+
 // Fail-fast CSRF secret validation on module load
 try {
   getCsrfSecret();
@@ -179,6 +223,8 @@ module.exports = {
   getSessionId: getSessionId,
   generateCsrfToken: generateCsrfToken,
   validateCsrfToken: validateCsrfToken,
+  shouldRotateCsrfToken: shouldRotateCsrfToken,
+  setCsrfTokenHeader: setCsrfTokenHeader,
   generateNonce: generateNonce,
   validateRequestTimestamp: validateRequestTimestamp,
 };

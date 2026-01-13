@@ -242,6 +242,9 @@ if (import.meta.env.DEV) {
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
+    <link rel="alternate" hreflang="zh-CN" href={canonical} />
+    <link rel="alternate" hreflang="zh-Hans" href={canonical} />
+    <link rel="alternate" hreflang="x-default" href={canonical} />
     <meta name="robots" content={noindex ? "noindex, nofollow" : "index, follow, max-image-preview:large"} />
     <meta name="author" content="PocketBase.cn" />
     {baiduVerification ? <meta name="baidu-site-verification" content={baiduVerification} /> : null}

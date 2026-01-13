@@ -74,6 +74,16 @@ onRecordUpdateRequest(function (e) {
 
 routerAdd("GET", "/api/comments/list", function (c) {
   var pbcn = require(__hooks + "/lib/pbcn.js");
+  var resp = null;
+  var log = null;
+  try {
+    resp = require(__hooks + "/lib/response.js");
+    log = require(__hooks + "/lib/logger.js");
+  } catch (_) {
+    return c.json(500, { error: "Failed to load helpers" });
+  }
+
+  var ctx = log.withRequestContext(c, { endpoint: "comments_list" });
 
   var info = c.requestInfo() || {};
   var pluginSlug = pbcn.trim(
@@ -87,12 +97,7 @@ routerAdd("GET", "/api/comments/list", function (c) {
   );
 
   if (!!pluginSlug === !!showcaseSlug) {
-    return c.json(400, {
-      error: {
-        code: "INVALID_TARGET",
-        message: "Exactly one of plugin/showcase is required",
-      },
-    });
+    return resp.badRequest(c, "Exactly one of plugin/showcase is required");
   }
 
   var limitRaw =
@@ -127,9 +132,7 @@ routerAdd("GET", "/api/comments/list", function (c) {
       targetId = s.id;
     }
   } catch (_) {
-    return c.json(404, {
-      error: { code: "NOT_FOUND", message: "Target not found" },
-    });
+    return resp.notFound(c, "Target not found");
   }
 
   var filter = pluginSlug ? "plugin = {:id}" : "showcase = {:id}";
@@ -195,6 +198,12 @@ routerAdd("GET", "/api/comments/list", function (c) {
     });
   }
 
+  log.info(ctx, "Comments listed", {
+    target: pluginSlug || showcaseSlug,
+    count: data.length,
+    hasMore: hasMore,
+  });
+
   return c.json(200, {
     data: data,
     meta: {
@@ -211,30 +220,62 @@ routerAdd(
   "/api/comments/create",
   function (c) {
     var pbcn = require(__hooks + "/lib/pbcn.js");
+    var resp = null;
+    var log = null;
+    var validator = null;
+    try {
+      resp = require(__hooks + "/lib/response.js");
+      log = require(__hooks + "/lib/logger.js");
+      validator = require(__hooks + "/lib/validator.js");
+    } catch (_) {
+      return c.json(500, { error: "Failed to load helpers" });
+    }
+
+    var ctx = log.withRequestContext(c, { endpoint: "comments_create" });
+    var perf = log.createPerfContext();
+    ctx.perf = perf;
 
     var auth = c.auth || null;
-    if (!auth)
-      return c.json(401, {
-        error: { code: "UNAUTHORIZED", message: "Authentication required" },
-      });
+    if (!auth) return resp.unauthorized(c, "Authentication required");
 
     var ip = "";
     try {
       ip = c.realIP();
     } catch (_) {}
 
-    if (
-      !pbcn.rateLimitAllow({
-        id: "comments_create",
-        windowSec: 60,
-        max: 10,
-        key: ip || auth.id,
-      })
-    ) {
-      return c.json(429, {
-        error: { code: "RATE_LIMITED", message: "Too many requests" },
-      });
+    // Use rate_limits module for tier-based limiting
+    var rateLimits = null;
+    try {
+      rateLimits = require(__hooks + "/lib/rate_limits.js");
+    } catch (_) {}
+
+    if (rateLimits) {
+      var rateResult = rateLimits.checkRateLimit(c, "comment", null);
+      if (!rateResult.allowed) {
+        log.warn(ctx, "Rate limit exceeded", {
+          tier: rateResult.tier,
+          key: rateResult.key,
+        });
+        return resp.rateLimited(
+          c,
+          "Too many comment requests. Please try again later.",
+        );
+      }
+    } else {
+      // Fallback to pbcn rate limiting
+      if (
+        !pbcn.rateLimitAllow({
+          id: "comments_create",
+          windowSec: 60,
+          max: 10,
+          key: ip || auth.id,
+        })
+      ) {
+        return resp.rateLimited(c, "Too many requests");
+      }
     }
+
+    log.addCheckpoint(perf, "rate_limit_checked");
 
     var info = c.requestInfo() || {};
     var body = info.body || {};
@@ -245,24 +286,21 @@ routerAdd(
     var content = pbcn.trim(body.content || "");
 
     if (!!pluginSlug === !!showcaseSlug) {
-      return c.json(400, {
-        error: {
-          code: "INVALID_TARGET",
-          message: "Exactly one of plugin/showcase is required",
-        },
-      });
+      return resp.badRequest(c, "Exactly one of plugin/showcase is required");
     }
 
-    if (!content || content.length < 1) {
-      return c.json(400, {
-        error: { code: "INVALID_CONTENT", message: "Missing content" },
-      });
+    // Use validator for content validation
+    if (!validator.isLength(content, 1, 5000)) {
+      return resp.badRequest(
+        c,
+        "Content must be between 1 and 5000 characters",
+      );
     }
-    if (content.length > 5000) {
-      return c.json(400, {
-        error: { code: "INVALID_CONTENT", message: "Content too long" },
-      });
-    }
+
+    // Sanitize content to prevent XSS
+    content = validator.sanitizeHtml(content);
+
+    log.addCheckpoint(perf, "validation_complete");
 
     var targetId = "";
     try {
@@ -278,9 +316,7 @@ routerAdd(
         targetId = s.id;
       }
     } catch (_) {
-      return c.json(404, {
-        error: { code: "NOT_FOUND", message: "Target not found" },
-      });
+      return resp.notFound(c, "Target not found");
     }
 
     var col = $app.findCollectionByNameOrId("comments");
@@ -295,15 +331,21 @@ routerAdd(
     // status and other invariants are enforced by hooks.
     $app.save(r);
 
-    return c.json(200, {
-      data: {
-        id: r.id,
-        author: { id: auth.id },
-        content: r.get("content") || "",
-        status: r.get("status") || "",
-        parent: r.get("parent") || "",
-        created: r.get("created") || null,
-      },
+    log.addCheckpoint(perf, "comment_saved");
+
+    log.info(ctx, "Comment created", {
+      commentId: r.id,
+      target: pluginSlug || showcaseSlug,
+      status: r.get("status"),
+    });
+
+    return resp.created(c, {
+      id: r.id,
+      author: { id: auth.id },
+      content: r.get("content") || "",
+      status: r.get("status") || "",
+      parent: r.get("parent") || "",
+      created: r.get("created") || null,
     });
   },
   $apis.requireAuth(),

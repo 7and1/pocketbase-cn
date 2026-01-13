@@ -1,0 +1,964 @@
+---
+title: "PocketBase 微信小程序登录实现"
+description: "详细讲解如何在 PocketBase 中实现微信小程序用户认证，包括 OAuth 流程、代码实现和最佳实践。"
+excerpt: "微信小程序是国内最流行的移动应用平台之一。本文将详细介绍如何在 PocketBase 中实现微信小程序登录，包括完整的代码示例和生产环境部署建议。"
+publishDate: 2025-01-13
+category: "实战教程"
+tags: ["微信小程序", "OAuth", "用户认证", "移动开发"]
+author: "PocketBase.cn"
+featured: true
+difficulty: "intermediate"
+---
+
+## 目录
+
+1. [微信登录概述](#微信登录概述)
+2. [准备工作](#准备工作)
+3. [后端实现](#后端实现)
+4. [小程序端实现](#小程序端实现)
+5. [完整流程](#完整流程)
+6. [最佳实践](#最佳实践)
+7. [故障排查](#故障排查)
+
+## 微信登录概述
+
+### 登录流程
+
+```
+┌─────────────┐                    ┌─────────────┐                    ┌─────────────┐
+│  小程序前端  │                    │  PocketBase │                    │   微信服务器  │
+└──────┬──────┘                    └──────┬──────┘                    └──────┬──────┘
+       │                                  │                                  │
+       │  1. wx.login()                    │                                  │
+       ├─────────────────────────────────>│                                  │
+       │  获取 code                         │                                  │
+       │<─────────────────────────────────┤                                  │
+       │                                  │                                  │
+       │  2. 发送 code 到后端              │                                  │
+       ├─────────────────────────────────>│                                  │
+       │                                  │  3. code2Session                 │
+       │                                  │┼────────────────────────────────>│
+       │                                  │  4. 返回 openid, session_key     │
+       │                                  │<────────────────────────────────┤
+       │                                  │                                  │
+       │                                  │  5. 获取用户信息                  │
+       │                                  │┼────────────────────────────────>│
+       │                                  │  6. 返回解密数据                  │
+       │                                  │<────────────────────────────────┤
+       │                                  │                                  │
+       │  7. 创建/更新用户                 │                                  │
+       │                                  │  (数据库操作)                    │
+       │                                  │                                  │
+       │  8. 返回 token                    │                                  │
+       │<─────────────────────────────────┤                                  │
+       │                                  │                                  │
+       │  9. 存储token，完成登录            │                                  │
+       │                                  │                                  │
+```
+
+### 为什么需要自定义实现
+
+PocketBase 内置的 OAuth2 主要支持标准 OAuth 提供商（如 Google、GitHub），微信小程序使用的是自定义的登录协议，需要通过 JS Hook 或自定义后端逻辑来实现。
+
+## 准备工作
+
+### 1. 注册小程序账号
+
+1. 访问 [微信公众平台](https://mp.weixin.qq.com/)
+2. 注册小程序账号
+3. 完成认证（个人或企业）
+4. 获取 AppID 和 AppSecret
+
+### 2. 配置服务器域名
+
+在微信公众平台配置：
+
+```
+开发 > 开发管理 > 开发设置 > 服务器域名
+
+request 合法域名：
+- https://api.yourserver.com
+
+socket 合法域名：
+- wss://api.yourserver.com
+```
+
+### 3. 创建数据表结构
+
+在 PocketBase Admin UI 中创建 `miniprogram_users` 集合：
+
+| 字段名      | 类型   | 必填 | 说明         |
+| ----------- | ------ | ---- | ------------ |
+| openid      | text   | 是   | 微信 OpenID  |
+| unionid     | text   | 否   | 微信 UnionID |
+| nickname    | text   | 否   | 昵称         |
+| avatarUrl   | text   | 否   | 头像 URL     |
+| gender      | number | 否   | 性别         |
+| country     | text   | 否   | 国家         |
+| province    | text   | 否   | 省份         |
+| city        | text   | 否   | 城市         |
+| language    | text   | 否   | 语言         |
+| phoneNumber | text   | 否   | 手机号       |
+| lastLogin   | date   | 否   | 最后登录时间 |
+
+设置 API 规则：
+
+```
+Create:  openid != "" && @request.auth.id != ""
+List:    id != "" && @request.auth.id != ""
+View:    id != "" && @request.auth.id != ""
+Update:  @request.auth.id != ""
+Delete:  @request.auth.role = "admin"
+```
+
+## 后端实现
+
+### 1. 创建微信登录 Hook
+
+创建 `pb_hooks/wechat_auth.js`：
+
+```javascript
+/// <reference path="../pb_data/types.d.ts" />
+
+/**
+ * 微信小程序登录
+ * @param {string} code - wx.login() 获取的 code
+ * @param {string} userInfo - 用户加密信息
+ * @param {string} encryptedData - 加密的用户数据
+ * @param {string} iv - 加密向量
+ */
+routerAdd("POST", "/api/wechat-login", (c) => {
+  const info = Object.fromEntries(
+    new URLSearchParams(new URL(c.request().url).search),
+  );
+
+  const code = info.code;
+  const encryptedData = info.encryptedData;
+  const iv = info.iv;
+  const userInfo = info.userInfo ? JSON.parse(info.userInfo) : null;
+
+  if (!code) {
+    return c.json(400, { error: "code is required" });
+  }
+
+  try {
+    // 1. 使用 code 换取 openid 和 session_key
+    const wxResponse = http.send({
+      url: "https://api.weixin.qq.com/sns/jscode2session",
+      method: "GET",
+      body: null,
+      headers: {},
+      query: {
+        appid: $app.settings().wechat.appid,
+        secret: $app.settings().wechat.secret,
+        js_code: code,
+        grant_type: "authorization_code",
+      },
+      timeout: 10,
+    });
+
+    const wxData = JSON.parse(wxResponse);
+
+    if (wxData.errcode) {
+      return c.json(400, {
+        error: "WeChat API error",
+        code: wxData.errcode,
+        message: wxData.errmsg,
+      });
+    }
+
+    const openid = wxData.openid;
+    const unionid = wxData.unionid;
+    const sessionKey = wxData.session_key;
+
+    // 2. 查找或创建用户
+    let user = null;
+
+    // 尝试通过 openid 查找
+    const records = $app
+      .dao()
+      .findRecordsByFilter("miniprogram_users", `openid = "${openid}"`, "", 1);
+
+    if (records.length > 0) {
+      // 更新现有用户
+      user = records[0];
+
+      // 解密用户数据
+      let decryptedData = null;
+      if (encryptedData && iv) {
+        decryptedData = decryptWeChatData(encryptedData, sessionKey, iv);
+      }
+
+      const updateData = {
+        lastLogin: new Date().toISOString(),
+      };
+
+      if (userInfo) {
+        updateData.nickname = userInfo.nickName;
+        updateData.avatarUrl = userInfo.avatarUrl;
+        updateData.gender = userInfo.gender;
+        updateData.country = userInfo.country;
+        updateData.province = userInfo.province;
+        updateData.city = userInfo.city;
+        updateData.language = userInfo.language;
+      }
+
+      if (decryptedData) {
+        Object.assign(updateData, decryptedData);
+      }
+
+      $app.dao().saveRecord(user, updateData);
+    } else {
+      // 创建新用户
+      const collection = $app
+        .dao()
+        .findCollectionByNameOrId("miniprogram_users");
+      user = new Record(collection);
+
+      let decryptedData = null;
+      if (encryptedData && iv) {
+        decryptedData = decryptWeChatData(encryptedData, sessionKey, iv);
+      }
+
+      const formData = new FormData();
+      formData.append("openid", openid);
+      if (unionid) formData.append("unionid", unionid);
+
+      if (userInfo) {
+        formData.append("nickname", userInfo.nickName || "");
+        formData.append("avatarUrl", userInfo.avatarUrl || "");
+        formData.append("gender", userInfo.gender?.toString() || "0");
+        formData.append("country", userInfo.country || "");
+        formData.append("province", userInfo.province || "");
+        formData.append("city", userInfo.city || "");
+        formData.append("language", userInfo.language || "zh_CN");
+      }
+
+      if (decryptedData) {
+        if (decryptedData.purePhoneNumber) {
+          formData.append("phoneNumber", decryptedData.purePhoneNumber);
+        }
+      }
+
+      formData.append("lastLogin", new Date().toISOString());
+
+      $app.dao().saveRecord(user);
+      $app.dao().save(user, formData);
+    }
+
+    // 3. 生成 JWT token
+    const token = $app.settings().recordAuthToken.duration;
+    const jwt = $app.createRecordToken(user, token);
+
+    return c.json(200, {
+      token: jwt,
+      user: {
+        id: user.id,
+        openid: user.openid,
+        nickname: user.nickname,
+        avatarUrl: user.avatarUrl,
+      },
+    });
+  } catch (error) {
+    return c.json(500, { error: error.message });
+  }
+});
+
+/**
+ * 解密微信数据
+ * 需要 crypto-js 库，需要在 pb_hooks/package.json 中添加依赖
+ */
+function decryptWeChatData(encryptedData, sessionKey, iv) {
+  // 这里需要实现 AES-128-CBC 解密
+  // 由于 JS Hook 环境限制，建议通过外部服务实现
+  // 或者使用 PocketBase Go 插件
+
+  return null;
+}
+
+/**
+ * 获取微信用户手机号
+ */
+routerAdd("POST", "/api/wechat-phone", (c) => {
+  const info = Object.fromEntries(
+    new URLSearchParams(new URL(c.request().url).search),
+  );
+
+  const code = info.code;
+
+  if (!code) {
+    return c.json(400, { error: "code is required" });
+  }
+
+  try {
+    // 获取 access_token
+    const tokenResponse = http.send({
+      url: "https://api.weixin.qq.com/cgi-bin/token",
+      method: "GET",
+      query: {
+        grant_type: "client_credential",
+        appid: $app.settings().wechat.appid,
+        secret: $app.settings().wechat.secret,
+      },
+    });
+
+    const tokenData = JSON.parse(tokenResponse);
+
+    // 获取手机号
+    const phoneResponse = http.send({
+      url: `https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token=${tokenData.access_token}`,
+      method: "POST",
+      body: JSON.stringify({ code }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const phoneData = JSON.parse(phoneResponse);
+
+    if (phoneData.errcode !== 0) {
+      return c.json(400, { error: phoneData.errmsg });
+    }
+
+    return c.json(200, {
+      phoneNumber: phoneData.phone_info.phoneNumber,
+      purePhoneNumber: phoneData.phone_info.purePhoneNumber,
+      countryCode: phoneData.phone_info.countryCode,
+    });
+  } catch (error) {
+    return c.json(500, { error: error.message });
+  }
+});
+```
+
+### 2. 配置微信参数
+
+在 PocketBase 设置中添加微信配置，或直接在代码中配置：
+
+```javascript
+// pb_hooks/wechat_auth.js
+
+const WECHAT_CONFIG = {
+  appid: "your_appid_here",
+  secret: "your_secret_here",
+};
+```
+
+### 3. 使用 Go 插件（推荐）
+
+对于生产环境，建议使用 Go 插件实现更高效的微信登录：
+
+```go
+// pb_hooks/wechat.go
+package main
+
+import (
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"time"
+
+	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/models"
+	"github.com/pocketbase/pocketbase/tools/types"
+)
+
+type WeChatConfig struct {
+	AppID  string
+	Secret string
+}
+
+type WxCode2SessionResponse struct {
+	OpenID     string `json:"openid"`
+	SessionKey string `json:"session_key"`
+	UnionID    string `json:"unionid"`
+	ErrCode    int    `json:"errcode"`
+	ErrMsg     string `json:"errmsg"`
+}
+
+type WxUserInfo struct {
+	OpenID    string `json:"openId"`
+	NickName  string `json:"nickName"`
+	Gender    int    `json:"gender"`
+	City      string `json:"city"`
+	Province  string `json:"province"`
+	Country   string `json:"country"`
+	AvatarURL string `json:"avatarUrl"`
+	Language  string `json:"language"`
+}
+
+func wechatLogin(e *core.RequestEvent) error {
+	appID := e.App.Settings().Value["wechat"].(map[string]any)["appid"].(string)
+	secret := e.App.Settings().Value["wechat"].(map[string]any)["secret"].(string)
+
+	code := e.Request.URL.Query().Get("code")
+	if code == "" {
+		return e.JSON(http.StatusBadRequest, map[string]any{"error": "code is required"})
+	}
+
+	// 调用微信 API
+	wxURL := fmt.Sprintf(
+		"https://api.weixin.qq.com/sns/jscode2session?appid=%s&secret=%s&js_code=%s&grant_type=authorization_code",
+		appID,
+		secret,
+		code,
+	)
+
+	resp, err := http.Get(wxURL)
+	if err != nil {
+		return e.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
+	}
+	defer resp.Body.Close()
+
+	var wxResp WxCode2SessionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&wxResp); err != nil {
+		return e.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
+	}
+
+	if wxResp.ErrCode != 0 {
+		return e.JSON(http.StatusBadRequest, map[string]any{
+			"error":   "WeChat API error",
+			"code":    wxResp.ErrCode,
+			"message": wxResp.ErrMsg,
+		})
+	}
+
+	// 查找或创建用户
+	collection, _ := e.App.Dao().FindCollectionByNameOrId("miniprogram_users")
+
+	records, _ := e.App.Dao().FindRecordsByFilter(
+		collection.Id,
+		fmt.Sprintf("openid = '%s'", wxResp.OpenID),
+		"",
+		1,
+	)
+
+	var user *models.Record
+	if len(records) > 0 {
+		user = records[0]
+		user.Set("lastLogin", time.Now())
+		e.App.Dao().SaveRecord(user)
+	} else {
+		user = models.NewRecord(collection)
+		user.Set("openid", wxResp.OpenID)
+		user.Set("nickname", "微信用户")
+		user.Set("lastLogin", time.Now())
+		e.App.Dao().SaveRecord(user)
+	}
+
+	// 生成 token
+	token, _ := e.App.NewRecordAuthToken(user, types.NowDefault().Add(time.Hour*24*30))
+
+	return e.JSON(http.StatusOK, map[string]any{
+		"token": token,
+		"user": map[string]any{
+			"id":         user.Id,
+			"openid":     user.GetString("openid"),
+			"nickname":   user.GetString("nickname"),
+			"avatarUrl":  user.GetString("avatarUrl"),
+		},
+	})
+}
+
+// 添加路由
+func main() {
+	app := core.NewApp()
+
+	app.OnBeforeServe().Add(func(e *core.ServeEvent) error {
+		e.Router.GET("/api/wechat-login", wechatLogin)
+		return nil
+	})
+
+	if err := app.Start(); err != nil {
+		app.Logger().Error(err.Error())
+	}
+}
+```
+
+## 小程序端实现
+
+### 1. 封装登录工具类
+
+```javascript
+// utils/wechat-auth.js
+
+const BASE_URL = "https://api.yourserver.com";
+
+/**
+ * 微信登录
+ */
+export async function wechatLogin() {
+  try {
+    // 1. 获取 code
+    const loginRes = await wx.login();
+    if (!loginRes.code) {
+      throw new Error("获取微信登录 code 失败");
+    }
+
+    // 2. 发送到服务器
+    const response = await wx.request({
+      url: `${BASE_URL}/api/wechat-login`,
+      method: "POST",
+      data: {
+        code: loginRes.code,
+      },
+      header: {
+        "content-type": "application/x-www-form-urlencoded",
+      },
+    });
+
+    if (response.statusCode !== 200) {
+      throw new Error(response.data.error || "登录失败");
+    }
+
+    const { token, user } = response.data;
+
+    // 3. 存储登录信息
+    wx.setStorageSync("pb_token", token);
+    wx.setStorageSync("pb_user", user);
+
+    return { token, user };
+  } catch (error) {
+    console.error("微信登录失败:", error);
+    throw error;
+  }
+}
+
+/**
+ * 获取用户信息（需要授权）
+ */
+export async function getUserProfile() {
+  return new Promise((resolve, reject) => {
+    wx.getUserProfile({
+      desc: "用于完善会员资料",
+      success: (res) => {
+        resolve(res.userInfo);
+      },
+      fail: (err) => {
+        reject(err);
+      },
+    });
+  });
+}
+
+/**
+ * 获取手机号
+ */
+export async function getPhoneNumber(code) {
+  try {
+    const response = await wx.request({
+      url: `${BASE_URL}/api/wechat-phone`,
+      method: "POST",
+      data: { code },
+      header: {
+        "content-type": "application/x-www-form-urlencoded",
+        Authorization: `Bearer ${wx.getStorageSync("pb_token")}`,
+      },
+    });
+
+    if (response.statusCode !== 200) {
+      throw new Error(response.data.error || "获取手机号失败");
+    }
+
+    return response.data;
+  } catch (error) {
+    console.error("获取手机号失败:", error);
+    throw error;
+  }
+}
+
+/**
+ * 检查登录状态
+ */
+export function checkLogin() {
+  const token = wx.getStorageSync("pb_token");
+  const user = wx.getStorageSync("pb_user");
+  return !!(token && user);
+}
+
+/**
+ * 退出登录
+ */
+export function logout() {
+  wx.removeStorageSync("pb_token");
+  wx.removeStorageSync("pb_user");
+}
+```
+
+### 2. PocketBase SDK 封装
+
+```javascript
+// utils/pocketbase.js
+
+import PocketBase from "pocketbase";
+import { wechatLogin, checkLogin } from "./wechat-auth.js";
+
+const pb = new PocketBase("https://api.yourserver.com");
+
+// 请求拦截器
+pb.beforeSend = function (url, options) {
+  const token = wx.getStorageSync("pb_token");
+  if (token) {
+    options.headers = options.headers || {};
+    options.headers["Authorization"] = `Bearer ${token}`;
+  }
+  return { url, options };
+};
+
+/**
+ * 初始化登录
+ */
+export async function initAuth() {
+  // 检查本地存储的 token
+  if (checkLogin()) {
+    const token = wx.getStorageSync("pb_token");
+    pb.authStore.save(token, wx.getStorageSync("pb_user"));
+    return true;
+  }
+
+  // 尝试静默登录
+  try {
+    await wechatLogin();
+    return true;
+  } catch (error) {
+    console.log("静默登录失败，需要用户主动登录");
+    return false;
+  }
+}
+
+/**
+ * 带认证的请求
+ */
+export async function authRequest(collection, action, data = {}) {
+  if (!checkLogin()) {
+    await wechatLogin();
+  }
+
+  switch (action) {
+    case "getList":
+      return await pb.collection(collection).getList(...data);
+    case "getOne":
+      return await pb.collection(collection).getOne(...data);
+    case "create":
+      return await pb.collection(collection).create(data);
+    case "update":
+      return await pb.collection(collection).update(...data);
+    case "delete":
+      return await pb.collection(collection).delete(...data);
+    default:
+      throw new Error(`Unknown action: ${action}`);
+  }
+}
+
+export default pb;
+```
+
+### 3. 登录页面实现
+
+```javascript
+// pages/login/login.js
+
+import { wechatLogin, getUserProfile } from "../../utils/wechat-auth.js";
+
+Page({
+  data: {
+    loading: false,
+  },
+
+  /**
+   * 微信快捷登录
+   */
+  async handleWechatLogin() {
+    if (this.data.loading) return;
+
+    this.setData({ loading: true });
+
+    try {
+      // 尝试静默登录
+      await wechatLogin();
+
+      wx.showToast({
+        title: "登录成功",
+        icon: "success",
+      });
+
+      // 登录成功后跳转
+      setTimeout(() => {
+        wx.switchTab({
+          url: "/pages/index/index",
+        });
+      }, 1500);
+    } catch (error) {
+      wx.showToast({
+        title: error.message || "登录失败",
+        icon: "none",
+      });
+    } finally {
+      this.setData({ loading: false });
+    }
+  },
+
+  /**
+   * 获取用户信息后登录
+   */
+  async handleLoginWithProfile() {
+    if (this.data.loading) return;
+
+    this.setData({ loading: true });
+
+    try {
+      // 获取用户信息授权
+      const userInfo = await getUserProfile();
+
+      // 获取登录 code
+      const loginRes = await wx.login();
+
+      // 发送到服务器
+      const response = await wx.request({
+        url: "https://api.yourserver.com/api/wechat-login",
+        method: "POST",
+        data: {
+          code: loginRes.code,
+          userInfo: JSON.stringify(userInfo),
+        },
+        header: {
+          "content-type": "application/x-www-form-urlencoded",
+        },
+      });
+
+      if (response.statusCode !== 200) {
+        throw new Error(response.data.error || "登录失败");
+      }
+
+      const { token, user } = response.data;
+
+      // 存储登录信息
+      wx.setStorageSync("pb_token", token);
+      wx.setStorageSync("pb_user", user);
+
+      wx.showToast({
+        title: "登录成功",
+        icon: "success",
+      });
+
+      setTimeout(() => {
+        wx.switchTab({
+          url: "/pages/index/index",
+        });
+      }, 1500);
+    } catch (error) {
+      wx.showToast({
+        title: error.message || "登录失败",
+        icon: "none",
+      });
+    } finally {
+      this.setData({ loading: false });
+    }
+  },
+
+  /**
+   * 获取手机号
+   */
+  async handleGetPhoneNumber(e) {
+    const { code } = e.detail;
+
+    if (!code) {
+      wx.showToast({
+        title: "获取手机号失败",
+        icon: "none",
+      });
+      return;
+    }
+
+    try {
+      // 调用后端接口获取手机号
+      // ... 手机号处理逻辑
+
+      wx.showToast({
+        title: "获取成功",
+        icon: "success",
+      });
+    } catch (error) {
+      wx.showToast({
+        title: "获取手机号失败",
+        icon: "none",
+      });
+    }
+  },
+});
+```
+
+### 4. 登录页面模板
+
+```html
+<!-- pages/login/login.wxml -->
+<view class="login-container">
+  <view class="logo-section">
+    <image class="logo" src="/assets/logo.png" mode="aspectFit"></image>
+    <text class="app-name">我的应用</text>
+    <text class="app-slogan">欢迎回来</text>
+  </view>
+
+  <view class="login-section">
+    <button
+      class="login-btn wechat-btn"
+      loading="{{loading}}"
+      disabled="{{loading}}"
+      bindtap="handleWechatLogin"
+    >
+      <image class="icon" src="/assets/wechat-icon.png"></image>
+      <text>微信快捷登录</text>
+    </button>
+
+    <button
+      class="login-btn profile-btn"
+      loading="{{loading}}"
+      disabled="{{loading}}"
+      bindtap="handleLoginWithProfile"
+    >
+      <image class="icon" src="/assets/wechat-icon.png"></image>
+      <text>获取用户信息登录</text>
+    </button>
+
+    <button
+      class="login-btn phone-btn"
+      open-type="getPhoneNumber"
+      bindgetphonenumber="handleGetPhoneNumber"
+    >
+      <text>获取手机号</text>
+    </button>
+  </view>
+
+  <view class="agreement-section">
+    <checkbox-group bindchange="handleAgreementChange">
+      <label>
+        <checkbox value="agree" checked="{{agreed}}" />
+        <text>我已阅读并同意</text>
+        <text class="link" bindtap="showUserAgreement">《用户协议》</text>
+        <text>和</text>
+        <text class="link" bindtap="showPrivacyPolicy">《隐私政策》</text>
+      </label>
+    </checkbox-group>
+  </view>
+</view>
+```
+
+## 完整流程
+
+### 用户首次登录流程
+
+```javascript
+// app.js
+
+import { initAuth } from "./utils/pocketbase.js";
+
+App({
+  onLaunch() {
+    this.checkUpdate();
+  },
+
+  async onShow() {
+    // 初始化认证
+    const isLoggedIn = await initAuth();
+
+    if (!isLoggedIn) {
+      // 未登录，跳转到登录页
+      wx.reLaunch({
+        url: "/pages/login/login",
+      });
+    }
+  },
+
+  checkUpdate() {
+    if (wx.canIUse("getUpdateManager")) {
+      const updateManager = wx.getUpdateManager();
+
+      updateManager.onCheckForUpdate((res) => {
+        if (res.hasUpdate) {
+          updateManager.onUpdateReady(() => {
+            wx.showModal({
+              title: "更新提示",
+              content: "新版本已准备好，是否重启应用？",
+              success: (res) => {
+                if (res.confirm) {
+                  updateManager.applyUpdate();
+                }
+              },
+            });
+          });
+
+          updateManager.onUpdateFailed(() => {
+            wx.showModal({
+              title: "更新失败",
+              content: "新版本下载失败，请检查网络",
+              showCancel: false,
+            });
+          });
+        }
+      });
+    }
+  },
+});
+```
+
+## 最佳实践
+
+### 1. 安全性
+
+- **不要在前端存储 AppSecret**：所有涉及 AppSecret 的操作必须在后端完成
+- **使用 HTTPS**：生产环境必须使用 HTTPS
+- **验证数据来源**：使用微信返回的水印验证数据真实性
+- **Token 刷新**：实现 token 自动刷新机制
+
+### 2. 用户体验
+
+```javascript
+// 静默登录（无感知）
+async function silentLogin() {
+  try {
+    // 检查本地 token 是否有效
+    const token = wx.getStorageSync("pb_token");
+    if (token) {
+      // 验证 token 有效性
+      const valid = await validateToken(token);
+      if (valid) return true;
+    }
+
+    // 尝试静默登录
+    await wechatLogin();
+    return true;
+  } catch (error) {
+    // 静默登录失败，显示登录按钮
+    return false;
+  }
+}
+```
+
+### 3. 错误处理
+
+```javascript
+// 统一错误处理
+function handleWxError(error) {
+  const errorMap = {
+    40029: "code 无效",
+    45011: "API 调用太频繁",
+    40163: "code 已使用",
+  };
+
+  if (error.errCode) {
+    return errorMap[error.errCode] || `微信错误: ${error.errCode}`;
+  }
+
+  return error.message || "未知错误";
+}
+```
+
+## 参考资源
+
+- [PocketBase 官方文档](/docs)
+- [微信小程序开发文档](https://developers.weixin.qq.com/miniprogram/dev/framework/)
+- [生产部署清单](/blog/production-deployment-checklist)
+- [数据库设计最佳实践](/blog/pocketbase-database-design-best-practices)

@@ -71,38 +71,40 @@ export function ActionButton({
     setCurrentCount(optimisticCount);
     setError(null);
 
-    startPending(async () => {
-      try {
-        const url = new URL(endpoint, POCKETBASE_URL);
-        const response = await fetch(url.toString(), {
-          method: optimisticActive ? "POST" : "DELETE",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          body: JSON.stringify({ slug }),
-        });
+    startPending(() => {
+      (async () => {
+        try {
+          const url = new URL(endpoint, POCKETBASE_URL);
+          const response = await fetch(url.toString(), {
+            method: optimisticActive ? "POST" : "DELETE",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body: JSON.stringify({ slug }),
+          });
 
-        if (!response.ok) {
-          const data = await response.json().catch(() => ({}));
-          throw new Error(data.message || `HTTP ${response.status}`);
+          if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.message || `HTTP ${response.status}`);
+          }
+
+          const data = await response.json();
+
+          // Show success feedback
+          setShowSuccess(true);
+          setTimeout(() => setShowSuccess(false), 2000);
+
+          onSuccess?.(data);
+        } catch (e) {
+          // Rollback on error
+          setIsActive(wasActive);
+          setCurrentCount(currentCount);
+          setError(e instanceof Error ? e.message : "操作失败");
+          setTimeout(() => setError(null), 3000);
         }
-
-        const data = await response.json();
-
-        // Show success feedback
-        setShowSuccess(true);
-        setTimeout(() => setShowSuccess(false), 2000);
-
-        onSuccess?.(data);
-      } catch (e) {
-        // Rollback on error
-        setIsActive(wasActive);
-        setCurrentCount(currentCount);
-        setError(e instanceof Error ? e.message : "操作失败");
-        setTimeout(() => setError(null), 3000);
-      }
+      })();
     });
   }, [
     authed,

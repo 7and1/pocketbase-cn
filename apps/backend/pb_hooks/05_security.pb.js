@@ -202,3 +202,49 @@ routerAdd("POST", "/api/admin/rate-limits/cleanup", function (c) {
     return c.json(500, { error: "Cleanup failed" });
   }
 });
+
+// CSRF token endpoint with auto-refresh
+// Returns a new CSRF token for the current session
+routerAdd("GET", "/api/csrf-token", function (c) {
+  var sec = null;
+  try {
+    sec = require(__hooks + "/lib/security.js");
+  } catch (_) {
+    return c.json(500, { error: "Failed to load security module" });
+  }
+
+  var sessionId = sec.getSessionId(c);
+  if (!sessionId) {
+    return c.json(400, { error: "Could not determine session" });
+  }
+
+  // Generate and set CSRF token header (auto-rotates if needed)
+  var token = sec.setCsrfTokenHeader(c, sessionId);
+  if (!token) {
+    return c.json(500, { error: "Failed to generate CSRF token" });
+  }
+
+  // Check if token was rotated
+  var existingToken = "";
+  try {
+    if (c.request && c.request.header) {
+      existingToken = c.request.header.get("X-CSRF-Token") || "";
+    }
+  } catch (_) {}
+
+  var rotated = sec.shouldRotateCsrfToken(existingToken);
+
+  // Set cache control to prevent caching
+  try {
+    if (c.response && c.response.header) {
+      var h = c.response.header();
+      h.set("Cache-Control", "no-store, no-cache, must-revalidate");
+      h.set("Pragma", "no-cache");
+    }
+  } catch (_) {}
+
+  return c.json(200, {
+    token: token,
+    rotated: rotated,
+  });
+});

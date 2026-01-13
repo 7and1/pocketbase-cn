@@ -1,0 +1,1256 @@
+---
+title: Flutter 集成
+description: 在 Flutter 项目中集成 PocketBase JS SDK，支持 iOS、Android、Web
+updatedDate: 2025-01-12
+difficulty: intermediate
+---
+
+Flutter 是 Google 推出的跨平台 UI 框架，可以一套代码编译到 iOS、Android、Web 等多个平台。本文介绍如何在 Flutter 中集成 PocketBase。
+
+## 安装
+
+### 添加依赖
+
+在 `pubspec.yaml` 中添加：
+
+```yaml
+dependencies:
+  pocketbase: ^0.2.1
+  http: ^1.1.0
+  flutter_secure_storage: ^8.0.0 # 安全存储 token
+```
+
+然后运行：
+
+```bash
+flutter pub get
+```
+
+## 基础配置
+
+### 创建 PocketBase 实例
+
+创建 `lib/services/pocketbase_service.dart`：
+
+```dart
+import 'package:pocketbase/pocketbase.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+class PocketBaseService {
+  static final PocketBaseService _instance = PocketBaseService._internal();
+  factory PocketBaseService() => _instance;
+
+  late final PocketBase _pb;
+  final _storage = const FlutterSecureStorage();
+
+  PocketBaseService._internal() {
+    // 根据平台选择 URL
+    const String url = String.fromEnvironment(
+      'POCKETBASE_URL',
+      defaultValue: 'http://localhost:8090',
+    );
+
+    _pb = PocketBase(url);
+
+    // 初始化时恢复认证状态
+    _initAuthStore();
+  }
+
+  Future<void> _initAuthStore() async {
+    // 从安全存储恢复 token
+    final token = await _storage.read(key: 'pb_token');
+    final model = await _storage.read(key: 'pb_model');
+
+    if (token != null && model != null) {
+      _pb.authStore.save(token, model);
+    }
+
+    // 监听认证状态变化
+    _pb.authStore.onChange.listen((event) async {
+      if (_pb.authStore.isValid) {
+        await _storage.write(key: 'pb_token', value: _pb.authStore.token);
+        await _storage.write(key: 'pb_model', value: _pb.authStore.model.toString());
+      } else {
+        await _storage.delete(key: 'pb_token');
+        await _storage.delete(key: 'pb_model');
+      }
+    });
+  }
+
+  PocketBase get client => _pb;
+
+  // 快捷访问认证状态
+  bool get isAuthenticated => _pb.authStore.isValid;
+  dynamic get currentUser => _pb.authStore.model;
+}
+```
+
+### 环境配置
+
+创建不同的运行配置：
+
+`lib/config/app_config.dart`：
+
+```dart
+class AppConfig {
+  static const String developmentUrl = 'http://192.168.1.100:8090';
+  static const String productionUrl = 'https://api.yourapp.com';
+
+  static String get baseUrl {
+    // 使用 --dart-define 编译参数
+    return const String.fromEnvironment(
+      'POCKETBASE_URL',
+      defaultValue: developmentUrl,
+    );
+  }
+}
+```
+
+运行时指定环境：
+
+```bash
+# 开发环境
+flutter run --dart-define=POCKETBASE_URL=http://192.168.1.100:8090
+
+# 生产环境
+flutter run --release --dart-define=POCKETBASE_URL=https://api.yourapp.com
+```
+
+## 用户认证
+
+### 认证服务
+
+创建 `lib/services/auth_service.dart`：
+
+```dart
+import 'package:pocketbase/pocketbase.dart';
+import 'pocketbase_service.dart';
+
+class AuthService {
+  final _pb = PocketBaseService().client;
+
+  // 邮箱密码登录
+  Future<RecordModel> loginWithEmail(String email, String password) async {
+    try {
+      final authData = await _pb.collection('users').authWithPassword(
+        email,
+        password,
+      );
+      return authData.record;
+    } catch (e) {
+      throw AuthException(_errorMessage(e));
+    }
+  }
+
+  // 注册新用户
+  Future<RecordModel> register({
+    required String email,
+    required String password,
+    required String passwordConfirm,
+    Map<String, dynamic>? data,
+  }) async {
+    try {
+      final body = {
+        'email': email,
+        'password': password,
+        'passwordConfirm': passwordConfirm,
+        ...?data,
+      };
+
+      final record = await _pb.collection('users').create(body: body);
+      return record;
+    } catch (e) {
+      throw AuthException(_errorMessage(e));
+    }
+  }
+
+  // OAuth2 登录
+  Future<void> loginWithOAuth2(String provider) async {
+    try {
+      await _pb.collection('users').authWithOAuth2(
+        provider,
+        (url) async {
+          // 在 Web 平台直接跳转
+          // 在移动平台使用 WebView 或外部浏览器
+          await _pb.collection('users').authWithOAuth2Redirect(url);
+        },
+      );
+    } catch (e) {
+      throw AuthException(_errorMessage(e));
+    }
+  }
+
+  // 登出
+  Future<void> logout() async {
+    _pb.authStore.clear();
+  }
+
+  // 刷新 Token
+  Future<void> refresh() async {
+    try {
+      await _pb.collection('users').authRefresh();
+    } catch (e) {
+      await logout();
+      throw AuthException(_errorMessage(e));
+    }
+  }
+
+  // 发送密码重置邮件
+  Future<void> requestPasswordReset(String email) async {
+    try {
+      await _pb.collection('users').requestPasswordReset(email);
+    } catch (e) {
+      throw AuthException(_errorMessage(e));
+    }
+  }
+
+  // 确认密码重置
+  Future<void> confirmPasswordReset({
+    required String token,
+    required String password,
+    required String passwordConfirm,
+  }) async {
+    try {
+      await _pb.collection('users').confirmPasswordReset(
+        token,
+        password,
+        passwordConfirm,
+      );
+    } catch (e) {
+      throw AuthException(_errorMessage(e));
+    }
+  }
+
+  String _errorMessage(dynamic error) {
+    if (error is ClientException) {
+      return error.response['message'] ?? '请求失败';
+    }
+    return error.toString();
+  }
+}
+
+class AuthException implements Exception {
+  final String message;
+  AuthException(this.message);
+  @override
+  String toString() => message;
+}
+```
+
+### 登录页面示例
+
+```dart
+// lib/pages/login_page.dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../services/auth_service.dart';
+import '../viewmodels/auth_viewmodel.dart';
+
+class LoginPage extends StatefulWidget {
+  const LoginPage({super.key});
+
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
+
+class _LoginPageState extends State<LoginPage> {
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _obscurePassword = true;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleLogin(AuthViewModel viewModel) async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final success = await viewModel.login(
+      _emailController.text.trim(),
+      _passwordController.text,
+    );
+
+    if (success && mounted) {
+      Navigator.of(context).pushReplacementNamed('/home');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Logo
+                  const Icon(
+                    Icons.flutter_dash,
+                    size: 80,
+                    color: Colors.blue,
+                  ),
+                  const SizedBox(height: 24),
+
+                  const Text(
+                    '欢迎回来',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 48),
+
+                  // 邮箱输入
+                  TextFormField(
+                    controller: _emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: const InputDecoration(
+                      labelText: '邮箱',
+                      prefixIcon: Icon(Icons.email),
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return '请输入邮箱';
+                      }
+                      if (!value.contains('@')) {
+                        return '请输入有效的邮箱';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+
+                  // 密码输入
+                  TextFormField(
+                    controller: _passwordController,
+                    obscureText: _obscurePassword,
+                    decoration: InputDecoration(
+                      labelText: '密码',
+                      prefixIcon: const Icon(Icons.lock),
+                      suffixIcon: IconButton(
+                        icon: Icon(_obscurePassword
+                            ? Icons.visibility
+                            : Icons.visibility_off),
+                        onPressed: () {
+                          setState(() {
+                            _obscurePassword = !_obscurePassword;
+                          });
+                        },
+                      ),
+                      border: const OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return '请输入密码';
+                      }
+                      if (value.length < 6) {
+                        return '密码至少 6 位';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 24),
+
+                  // 登录按钮
+                  Consumer<AuthViewModel>(
+                    builder: (context, viewModel, _) {
+                      return ElevatedButton(
+                        onPressed: viewModel.isLoading
+                            ? null
+                            : () => _handleLogin(viewModel),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: viewModel.isLoading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Text('登录', style: TextStyle(fontSize: 16)),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 16),
+
+                  // 错误提示
+                  Consumer<AuthViewModel>(
+                    builder: (context, viewModel, _) {
+                      if (viewModel.error == null) return const SizedBox.shrink();
+                      return Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.error, color: Colors.red.shade700),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                viewModel.error!,
+                                style: TextStyle(color: Colors.red.shade700),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text('还没有账号？'),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.of(context).pushNamed('/register');
+                        },
+                        child: const Text('立即注册'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+```
+
+## 数据操作
+
+### 通用数据服务
+
+创建 `lib/services/data_service.dart`：
+
+```dart
+import 'package:pocketbase/pocketbase.dart';
+import 'pocketbase_service.dart';
+
+class DataService<T extends RecordModel> {
+  final String collectionName;
+  late final PocketBase _pb;
+
+  DataService(this.collectionName) {
+    _pb = PocketBaseService().client;
+  }
+
+  // 获取列表
+  Future<ListResult<T>> getList({
+    int page = 1,
+    int perPage = 20,
+    String filter = '',
+    String sort = '-created',
+    String expand = '',
+  }) async {
+    try {
+      return await _pb.collection(collectionName).getList<ListResult<T>>(
+        page: page,
+        perPage: perPage,
+        filter: filter,
+        sort: sort,
+        expand: expand,
+      );
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // 获取完整列表
+  Future<List<T>> getFullList({
+    String filter = '',
+    String sort = '-created',
+    String expand = '',
+  }) async {
+    try {
+      return await _pb.collection(collectionName).getFullList<T>(
+        filter: filter,
+        sort: sort,
+        expand: expand,
+      );
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // 获取单条记录
+  Future<T> getOne(
+    String id, {
+    String expand = '',
+  }) async {
+    try {
+      return await _pb.collection(collectionName).getOne<T>(
+        id,
+        expand: expand,
+      );
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // 创建记录
+  Future<T> create(Map<String, dynamic> data) async {
+    try {
+      return await _pb.collection(collectionName).create(body: data);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // 更新记录
+  Future<T> update(String id, Map<String, dynamic> data) async {
+    try {
+      return await _pb.collection(collectionName).update(id, body: data);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // 删除记录
+  Future<void> delete(String id) async {
+    try {
+      await _pb.collection(collectionName).delete(id);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // 获取第一条记录
+  Future<T?> getFirst({
+    String filter = '',
+    String sort = '',
+    String expand = '',
+  }) async {
+    try {
+      return await _pb.collection(collectionName).getFirstListItem(
+        filter,
+        sort: sort,
+        expand: expand,
+      );
+    } catch (e) {
+      return null;
+    }
+  }
+}
+```
+
+### 具体业务服务示例
+
+```dart
+// lib/services/post_service.dart
+import 'data_service.dart';
+
+class PostService extends DataService {
+  PostService() : super('posts');
+
+  // 获取已发布的文章
+  Future<ListResult> getPublishedPosts({
+    int page = 1,
+    int perPage = 20,
+    String category = '',
+  }) async {
+    String filter = 'status = "published"';
+    if (category.isNotEmpty) {
+      filter += ' && category = "$category"';
+    }
+
+    return getList(
+      page: page,
+      perPage: perPage,
+      filter: filter,
+      sort: '-created',
+      expand: 'author',
+    );
+  }
+
+  // 搜索文章
+  Future<List> searchPosts(String query) async {
+    return getFullList(
+      filter: 'title ~ "$query" || content ~ "$query"',
+      sort: '-created',
+    );
+  }
+
+  // 获取用户的文章
+  Future<ListResult> getUserPosts(String userId, {int page = 1}) async {
+    return getList(
+      page: page,
+      perPage: 20,
+      filter: 'author = "$userId"',
+      sort: '-created',
+    );
+  }
+
+  // 创建文章（自动添加作者）
+  Future<Map<String, dynamic>> createPost({
+    required String title,
+    required String content,
+    required String excerpt,
+    required String category,
+    required List<String> tags,
+    String status = 'draft',
+  }) async {
+    final pb = PocketBaseService().client;
+    final data = {
+      'title': title,
+      'content': content,
+      'excerpt': excerpt,
+      'category': category,
+      'tags': tags,
+      'status': status,
+      'author': pb.authStore.model.id,
+    };
+
+    return await create(data);
+  }
+}
+```
+
+## 实时订阅
+
+### 实时服务
+
+```dart
+// lib/services/realtime_service.dart
+import 'dart:async';
+import 'package:pocketbase/pocketbase.dart';
+import 'pocketbase_service.dart';
+
+typedef RealtimeCallback = void Function(RecordModel record);
+
+class RealtimeService {
+  final _pb = PocketBaseService().client;
+  final Map<String, RealtimeSubscription> _subscriptions = {};
+
+  // 订阅集合的所有变化
+  Future<void> subscribe(
+    String collection,
+    RealtimeCallback onCreate,
+    RealtimeCallback? onUpdate,
+    RealtimeCallback? onDelete,
+  ) async {
+    if (_subscriptions.containsKey(collection)) {
+      return; // 已订阅
+    }
+
+    try {
+      final subscription = _pb.collection(collection).subscribe('*', (e) {
+        final record = e.record;
+        switch (e.action) {
+          case 'create':
+            onCreate(record);
+            break;
+          case 'update':
+            onUpdate?.call(record);
+            break;
+          case 'delete':
+            onDelete?.call(record);
+            break;
+        }
+      });
+
+      _subscriptions[collection] = subscription;
+    } catch (e) {
+      print('订阅失败: $e');
+    }
+  }
+
+  // 按条件订阅
+  Future<void> subscribeByFilter(
+    String collection,
+    String filter,
+    RealtimeCallback callback,
+  ) async {
+    try {
+      await _pb.collection(collection).subscribe('*', (e) {
+        // 在客户端过滤
+        if (_matchesFilter(e.record, filter)) {
+          callback(e.record);
+        }
+      });
+    } catch (e) {
+      print('订阅失败: $e');
+    }
+  }
+
+  // 取消订阅
+  void unsubscribe(String collection) {
+    _subscriptions[collection]?.unsubscribe();
+    _subscriptions.remove(collection);
+  }
+
+  // 取消所有订阅
+  void unsubscribeAll() {
+    _subscriptions.forEach((key, sub) => sub.unsubscribe());
+    _subscriptions.clear();
+  }
+
+  bool _matchesFilter(RecordModel record, String filter) {
+    // 简单的过滤实现
+    // 实际项目中可以解析 filter 表达式
+    return true;
+  }
+}
+```
+
+### 使用示例
+
+```dart
+// lib/pages/posts_page.dart
+class _PostsPageState extends State<PostsPage> {
+  final _postService = PostService();
+  final _realtimeService = RealtimeService();
+  final List<RecordModel> _posts = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPosts();
+    _setupRealtime();
+  }
+
+  @override
+  void dispose() {
+    _realtimeService.unsubscribe('posts');
+    super.dispose();
+  }
+
+  Future<void> _loadPosts() async {
+    setState(() => _loading = true);
+    try {
+      final result = await _postService.getPublishedPosts();
+      setState(() {
+        _posts.clear();
+        _posts.addAll(result.items as List<RecordModel>);
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() => _loading = false);
+    }
+  }
+
+  void _setupRealtime() {
+    _realtimeService.subscribe(
+      'posts',
+      // 创建
+      (record) {
+        setState(() {
+          _posts.insert(0, record);
+        });
+        _showSnackBar('新文章发布');
+      },
+      // 更新
+      (record) {
+        setState(() {
+          final index = _posts.indexWhere((p) => p.id == record.id);
+          if (index != -1) {
+            _posts[index] = record;
+          }
+        });
+        _showSnackBar('文章已更新');
+      },
+      // 删除
+      (record) {
+        setState(() {
+          _posts.removeWhere((p) => p.id == record.id);
+        });
+        _showSnackBar('文章已删除');
+      },
+    );
+  }
+
+  void _showSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return ListView.builder(
+      itemCount: _posts.length,
+      itemBuilder: (context, index) {
+        final post = _posts[index];
+        return ListTile(
+          title: Text(post.data['title'] ?? ''),
+          subtitle: Text(post.data['excerpt'] ?? ''),
+        );
+      },
+    );
+  }
+}
+```
+
+## 文件上传
+
+### 文件服务
+
+```dart
+// lib/services/file_service.dart
+import 'dart:io';
+import 'package:pocketbase/pocketbase.dart';
+import 'pocketbase_service.dart';
+
+class FileService {
+  final _pb = PocketBaseService().client;
+
+  // 上传单个文件
+  Future<RecordModel> uploadFile({
+    required String collection,
+    required String recordId,
+    required String field,
+    required File file,
+    ProgressCallback? onProgress,
+  }) async {
+    try {
+      return await _pb.collection(collection).update(
+        recordId,
+        files: [field],
+        body: {
+          field: await MultipartFile.fromFile(file.path),
+        },
+      );
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // 创建记录并上传文件
+  Future<RecordModel> createWithFile({
+    required String collection,
+    required String field,
+    required File file,
+    required Map<String, dynamic> data,
+  }) async {
+    try {
+      data[field] = await MultipartFile.fromFile(file.path);
+      return await _pb.collection(collection).create(body: data);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // 获取文件 URL
+  String getFileUrl(RecordModel record, String filename) {
+    return _pb.files.getUrl(record, filename);
+  }
+
+  // 获取缩略图 URL
+  String getThumbUrl(
+    RecordModel record,
+    String filename, {
+    int width = 100,
+    int height = 100,
+  }) {
+    return _pb.files.getUrl(
+      record,
+      filename,
+      thumb: '${width}x$height',
+    );
+  }
+
+  // 删除记录中的文件
+  Future<void> deleteFile({
+    required String collection,
+    required String recordId,
+    required String filename,
+  }) async {
+    try {
+      await _pb.collection(collection).update(
+        recordId,
+        body: {filename: null},
+      );
+    } catch (e) {
+      rethrow;
+    }
+  }
+}
+```
+
+### 图片选择器组件
+
+```dart
+// lib/widgets/image_picker.dart
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import '../services/file_service.dart';
+
+class ImagePickerWidget extends StatefulWidget {
+  final String? initialImage;
+  final Function(String?) onImageChanged;
+  final String collection;
+  final String? recordId;
+
+  const ImagePickerWidget({
+    super.key,
+    this.initialImage,
+    required this.onImageChanged,
+    required this.collection,
+    this.recordId,
+  });
+
+  @override
+  State<ImagePickerWidget> createState() => _ImagePickerWidgetState();
+}
+
+class _ImagePickerWidgetState extends State<ImagePickerWidget> {
+  final ImagePicker _picker = ImagePicker();
+  File? _imageFile;
+  String? _uploadedUrl;
+  bool _uploading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _uploadedUrl = widget.initialImage;
+  }
+
+  Future<void> _pickImage() async {
+    final XFile? image = await _picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 1920,
+      maxHeight: 1920,
+      imageQuality: 85,
+    );
+
+    if (image != null) {
+      setState(() {
+        _imageFile = File(image.path);
+        _uploading = true;
+      });
+
+      await _uploadImage(File(image.path));
+    }
+  }
+
+  Future<void> _takePhoto() async {
+    final XFile? photo = await _picker.pickImage(
+      source: ImageSource.camera,
+      maxWidth: 1920,
+      maxHeight: 1920,
+      imageQuality: 85,
+    );
+
+    if (photo != null) {
+      setState(() {
+        _imageFile = File(photo.path);
+        _uploading = true;
+      });
+
+      await _uploadImage(File(photo.path));
+    }
+  }
+
+  Future<void> _uploadImage(File file) async {
+    try {
+      final fileService = FileService();
+
+      if (widget.recordId != null) {
+        // 更新现有记录
+        final record = await fileService.uploadFile(
+          collection: widget.collection,
+          recordId: widget.recordId!,
+          field: 'image',
+          file: file,
+        );
+        setState(() {
+          _uploadedUrl = fileService.getFileUrl(record, record.data['image']);
+          _uploading = false;
+        });
+        widget.onImageChanged(_uploadedUrl);
+      } else {
+        // 只保存本地文件路径，等待记录创建后再上传
+        setState(() {
+          _uploading = false;
+        });
+        widget.onImageChanged(file.path);
+      }
+    } catch (e) {
+      setState(() => _uploading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('上传失败: $e')),
+        );
+      }
+    }
+  }
+
+  void _removeImage() {
+    setState(() {
+      _imageFile = null;
+      _uploadedUrl = null;
+    });
+    widget.onImageChanged(null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_imageFile != null || _uploadedUrl != null)
+          Stack(
+            children: [
+              Container(
+                width: double.infinity,
+                height: 200,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  image: DecorationImage(
+                    image: _imageFile != null
+                        ? FileImage(_imageFile!)
+                        : NetworkImage(_uploadedUrl!) as ImageProvider,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              ),
+              if (!_uploading)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: IconButton(
+                    icon: const Icon(Icons.delete, color: Colors.red),
+                    onPressed: _removeImage,
+                  ),
+                ),
+              if (_uploading)
+                Positioned.fill(
+                  child: Container(
+                    color: Colors.black54,
+                    child: const Center(
+                      child: CircularProgressIndicator(color: Colors.white),
+                    ),
+                  ),
+                ),
+            ],
+          )
+        else
+          Container(
+            width: double.infinity,
+            height: 150,
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.image, size: 48, color: Colors.grey.shade400),
+                const SizedBox(height: 8),
+                Text(
+                  '选择图片',
+                  style: TextStyle(color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+          ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _uploading ? null : _pickImage,
+                icon: const Icon(Icons.photo_library),
+                label: const Text('相册'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _uploading ? null : _takePhoto,
+                icon: const Icon(Icons.camera_alt),
+                label: const Text('拍照'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+```
+
+## 状态管理
+
+### Provider 示例
+
+```dart
+// lib/providers/auth_provider.dart
+import 'package:flutter/material.dart';
+import '../services/auth_service.dart';
+import '../services/pocketbase_service.dart';
+
+class AuthProvider with ChangeNotifier {
+  final _authService = AuthService();
+  final _pbService = PocketBaseService();
+
+  bool _isAuthenticated = false;
+  String? _error;
+
+  bool get isAuthenticated {
+    if (_isAuthenticated) return true;
+    return _pbService.isAuthenticated;
+  }
+
+  String? get error => _error;
+  dynamic get user => _pbService.currentUser;
+
+  Future<bool> login(String email, String password) async {
+    _error = null;
+    notifyListeners();
+
+    try {
+      await _authService.loginWithEmail(email, password);
+      _isAuthenticated = true;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> register({
+    required String email,
+    required String password,
+    required String passwordConfirm,
+    Map<String, dynamic>? data,
+  }) async {
+    _error = null;
+    notifyListeners();
+
+    try {
+      await _authService.register(
+        email: email,
+        password: password,
+        passwordConfirm: passwordConfirm,
+        data: data,
+      );
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<void> logout() async {
+    await _authService.logout();
+    _isAuthenticated = false;
+    notifyListeners();
+  }
+
+  void clearError() {
+    _error = null;
+    notifyListeners();
+  }
+}
+```
+
+## 平台特定配置
+
+### iOS 配置
+
+在 `ios/Runner/Info.plist` 中添加：
+
+```xml
+<key>NSPhotoLibraryUsageDescription</key>
+<string>需要访问相册以选择图片</string>
+<key>NSCameraUsageDescription</key>
+<string>需要使用相机拍照</string>
+<key>NSAppTransportSecurity</key>
+<dict>
+  <key>NSAllowsArbitraryLoads</key>
+  <true/>
+</dict>
+```
+
+### Android 配置
+
+在 `android/app/src/main/AndroidManifest.xml` 中添加：
+
+```xml
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.CAMERA" />
+<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+```
+
+## 常见问题
+
+### Q: WebSocket 连接失败？
+
+Flutter 的 WebSocket 实现与浏览器略有不同，确保：
+
+1. 使用支持的 WebSocket 协议版本
+2. 检查防火墙设置
+3. 确认 PocketBase 服务正常运行
+
+### Q: 如何处理大文件上传？
+
+使用分片上传：
+
+```dart
+Future<void> uploadLargeFile(File file) async {
+  const chunkSize = 1024 * 1024; // 1MB
+  final bytes = await file.readAsBytes();
+
+  for (int i = 0; i < bytes.length; i += chunkSize) {
+    final end = (i + chunkSize < bytes.length) ? i + chunkSize : bytes.length;
+    final chunk = bytes.sublist(i, end);
+    // 上传分片
+  }
+}
+```
+
+### Q: Token 过期如何处理？
+
+实现自动刷新机制：
+
+```dart
+// 在请求拦截器中
+Future<void> _requestInterceptor() async {
+  if (_pb.authStore.tokenExpire.compareTo(DateTime.now()) < 0) {
+    try {
+      await _authService.refresh();
+    } catch (e) {
+      await _authService.logout();
+      // 跳转登录页
+    }
+  }
+}
+```
+
+## 最佳实践
+
+1. **使用依赖注入**：通过 GetIt 或 Provider 管理服务实例
+2. **错误处理**：统一处理网络错误和业务错误
+3. **状态管理**：使用 Provider/Riverpod 管理全局状态
+4. **安全存储**：敏感信息使用 flutter_secure_storage
+5. **离线支持**：结合本地数据库实现离线缓存

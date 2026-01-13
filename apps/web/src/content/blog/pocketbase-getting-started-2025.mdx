@@ -1,0 +1,573 @@
+---
+title: "PocketBase 入门教程（2025版）"
+description: "从零开始学习 PocketBase，包括安装配置、核心概念介绍、以及构建第一个完整项目的完整指南。"
+excerpt: "PocketBase 是一个开源的后端即服务解决方案，本文将带你从零开始，了解 PocketBase 的核心概念，完成环境配置，并构建你的第一个 PocketBase 应用。"
+publishDate: 2025-01-13
+category: "教程"
+tags: ["PocketBase", "入门教程", "后端开发"]
+author: "PocketBase.cn"
+featured: true
+difficulty: "beginner"
+---
+
+## 目录
+
+1. [什么是 PocketBase](#什么是-pocketbase)
+2. [环境安装](#环境安装)
+3. [核心概念](#核心概念)
+4. [第一个项目](#第一个项目)
+5. [API 基础操作](#api-基础操作)
+6. [用户认证](#用户认证)
+7. [实时功能](#实时功能)
+8. [下一步学习](#下一步学习)
+
+## 什么是 PocketBase
+
+PocketBase 是一个开源的后端即服务（BaaS）解决方案，专为构建现代 Web 和移动应用而设计。它将数据库、认证系统、文件存储和实时订阅等功能集成到一个轻量级的可执行文件中。
+
+### 核心特性
+
+| 特性             | 说明                             |
+| ---------------- | -------------------------------- |
+| **轻量级**       | 单个可执行文件，约 15MB          |
+| **嵌入式数据库** | 基于 SQLite，支持大部分 SQL 操作 |
+| **内置认证**     | 邮箱密码、OAuth2、多种认证方式   |
+| **实时订阅**     | WebSocket 实时数据推送           |
+| **文件存储**     | 本地文件系统，支持缩略图         |
+| **Admin UI**     | 内置可视化管理后台               |
+| **可扩展**       | 支持 JS Hooks 和 Go 插件         |
+| **跨平台**       | Windows、macOS、Linux            |
+
+### 为什么选择 PocketBase
+
+```
+传统后端开发                      PocketBase
+┌─────────────────┐              ┌─────────────────┐
+│  配置数据库      │              │  下载即用        │
+│  编写 API       │      VS      │  内置 CRUD API  │
+│  实现认证       │              │  内置认证系统    │
+│  搭建管理后台   │              │  内置 Admin UI  │
+│  部署复杂       │              │  单文件部署      │
+└─────────────────┘              └─────────────────┘
+```
+
+**适用场景：**
+
+- 快速原型开发
+- 中小型应用后端
+- 个人项目与副业
+- 微服务架构中的单个服务
+- 需要完全掌控数据的场景
+
+## 环境安装
+
+### 1. 下载 PocketBase
+
+#### 国内镜像下载（推荐）
+
+```bash
+# Linux AMD64
+wget https://mirror.pocketbase.cn/download/pocketbase_linux_amd64.zip
+unzip pocketbase_linux_amd64.zip
+
+# Linux ARM64（适用于树莓派等）
+wget https://mirror.pocketbase.cn/download/pocketbase_linux_arm64.zip
+unzip pocketbase_linux_arm64.zip
+
+# macOS
+wget https://mirror.pocketbase.cn/download/pocketbase_darwin_amd64.zip
+unzip pocketbase_darwin_amd64.zip
+
+# macOS ARM64 (Apple Silicon)
+wget https://mirror.pocketbase.cn/download/pocketbase_darwin_arm64.zip
+unzip pocketbase_darwin_arm64.zip
+```
+
+#### 官方下载
+
+访问 [PocketBase 官网](https://pocketbase.io/docs) 下载对应平台的版本。
+
+### 2. 启动服务
+
+```bash
+# 解压后进入目录
+cd pocketbase
+
+# 启动服务器
+./pocketbase serve
+
+# 输出：
+# Server started at http://127.0.0.1:8090
+# Admin UI: http://127.0.0.1:8090/_/
+```
+
+### 3. 访问管理界面
+
+打开浏览器访问 `http://127.0.0.1:8090/_/`：
+
+```
+┌────────────────────────────────────────┐
+│          PocketBase Admin UI           │
+├────────────────────────────────────────┤
+│                                        │
+│  ┌──────────────────────────────────┐  │
+│  │   创建管理员账户                   │  │
+│  │                                   │  │
+│  │   邮箱: admin@example.com         │  │
+│  │   密码: ********                  │  │
+│  │   确认: ********                  │  │
+│  │                                   │  │
+│  │   [创建账户]                       │  │
+│  └──────────────────────────────────┘  │
+│                                        │
+└────────────────────────────────────────┘
+```
+
+### 4. 使用 Docker（可选）
+
+```bash
+# 拉取镜像
+docker pull ghcr.io/muchdogesec/pocketbase:latest
+
+# 运行容器
+docker run -d \
+  -p 8090:8090 \
+  -v ./pb_data:/pb_data \
+  -v ./pb_public:/pb_public \
+  --name pocketbase \
+  ghcr.io/muchdogesec/pocketbase:latest
+```
+
+## 核心概念
+
+### Collections（集合）
+
+PocketBase 使用集合来组织数据，类似于关系数据库中的表。
+
+```
+Collection: posts
+┌─────────────────────────────────────────────────────┐
+│  Field Name    │ Type      │ Required │ Options     │
+├─────────────────────────────────────────────────────┤
+│  title         │ text      │ Yes      │ -           │
+│  content       │ editor    │ Yes      │ -           │
+│  status        │ select    │ Yes      │ draft,published
+│  category      │ text      │ No       │ -           │
+│  tags          │ text[]    │ No       │ -           │
+│  author        │ relation  │ Yes      │ users       │
+│  publishDate   │ date      │ No       │ -           │
+│  cover         │ file      │ No       │ single      │
+└─────────────────────────────────────────────────────┘
+```
+
+### Records（记录）
+
+记录是集合中的单个数据条目：
+
+```json
+{
+  "id": "rec1234567890",
+  "collectionId": "col1234567890",
+  "collectionName": "posts",
+  "title": "我的第一篇文章",
+  "content": "这是文章内容...",
+  "status": "published",
+  "category": "技术",
+  "tags": ["PocketBase", "教程"],
+  "author": "user1234567890",
+  "created": "2025-01-13 10:00:00.000Z",
+  "updated": "2025-01-13 10:00:00.000Z"
+}
+```
+
+### API Rules（API 规则）
+
+每个集合都有 API 规则来控制访问权限：
+
+| 规则类型   | 说明         | 示例                           |
+| ---------- | ------------ | ------------------------------ |
+| **Create** | 创建记录权限 | `@request.auth.id != ""`       |
+| **List**   | 列表查询权限 | `status = "published"`         |
+| **View**   | 查看详情权限 | `@request.auth.id = author`    |
+| **Update** | 更新记录权限 | `@request.auth.id = author`    |
+| **Delete** | 删除记录权限 | `@request.auth.role = "admin"` |
+
+## 第一个项目
+
+让我们创建一个简单的博客系统。
+
+### 1. 创建 Collections
+
+#### 创建用户集合
+
+在 Admin UI 中，`users` 集合已默认创建，我们添加一些字段：
+
+| 字段名 | 类型 | 必填 |
+| ------ | ---- | ---- |
+| name   | text | 是   |
+| avatar | file | 否   |
+| bio    | text | 否   |
+
+#### 创建文章集合
+
+点击 "New Collection"，创建 `posts` 集合：
+
+| 字段名   | 类型     | 必填 | 选项             |
+| -------- | -------- | ---- | ---------------- |
+| title    | text     | 是   | -                |
+| content  | editor   | 是   | -                |
+| excerpt  | text     | 否   | -                |
+| status   | select   | 是   | draft, published |
+| category | text     | 否   | -                |
+| tags     | text[]   | 否   | -                |
+| author   | relation | 是   | users (many)     |
+
+设置 API 规则：
+
+```
+Create:  @request.auth.id != ""
+List:    id != "" && (status = "published" || @request.auth.id != "")
+View:    id != "" && (status = "published" || @request.auth.id != "")
+Update:  @request.auth.id = author
+Delete:  @request.auth.id = author || @request.auth.role = "admin"
+```
+
+### 2. 安装 JavaScript SDK
+
+```bash
+# 使用 npm
+npm install pocketbase
+
+# 使用 yarn
+yarn add pocketbase
+
+# 使用 pnpm
+pnpm add pocketbase
+
+# 浏览器直接引入
+<script src="https://cdn.jsdelivr.net/npm/pocketbase"></script>
+```
+
+## API 基础操作
+
+### 初始化客户端
+
+```javascript
+import PocketBase from "pocketbase";
+
+// 创建实例
+const pb = new PocketBase("http://127.0.0.1:8090");
+
+// 生产环境
+const pb = new PocketBase("https://api.yourserver.com");
+```
+
+### 创建记录
+
+```javascript
+// 创建文章
+const record = await pb.collection("posts").create({
+  title: "我的第一篇文章",
+  content: "这是文章内容...",
+  excerpt: "这是摘要",
+  status: "published",
+  category: "技术",
+  tags: ["PocketBase", "入门"],
+  author: "user_id_here",
+});
+
+console.log(record.id); // 新创建记录的 ID
+```
+
+### 查询记录
+
+```javascript
+// 获取单条记录
+const post = await pb.collection("posts").getOne("record_id", {
+  expand: "author", // 展开关联数据
+});
+
+// 获取列表（分页）
+const resultList = await pb.collection("posts").getList(1, 20, {
+  filter: 'status = "published"',
+  sort: "-created",
+});
+
+// 获取全部记录
+const allPosts = await pb.collection("posts").getFullList({
+  sort: "-created",
+});
+
+// 高级过滤
+const filtered = await pb.collection("posts").getList(1, 20, {
+  filter: 'status = "published" && category ~ "技术"',
+  sort: "-created",
+  expand: "author",
+});
+```
+
+### 更新记录
+
+```javascript
+const updated = await pb.collection("posts").update("record_id", {
+  title: "更新后的标题",
+  status: "draft",
+});
+```
+
+### 删除记录
+
+```javascript
+await pb.collection("posts").delete("record_id");
+```
+
+## 用户认证
+
+### 注册
+
+```javascript
+const userData = {
+  email: "user@example.com",
+  password: "secure_password_123",
+  passwordConfirm: "secure_password_123",
+  name: "张三",
+};
+
+const record = await pb.collection("users").create(userData);
+
+// 自动登录
+await pb
+  .collection("users")
+  .authWithPassword(userData.email, userData.password);
+```
+
+### 登录
+
+```javascript
+// 邮箱密码登录
+const authData = await pb
+  .collection("users")
+  .authWithPassword("user@example.com", "secure_password_123");
+
+console.log(authData.token); // JWT Token
+console.log(authData.record); // 用户信息
+
+// Token 会自动存储，后续请求自动携带
+```
+
+### 检查登录状态
+
+```javascript
+// 检查是否登录
+const isLoggedIn = pb.authStore.isValid;
+
+// 获取当前用户
+const user = pb.authStore.model;
+
+console.log(user?.name); // 张三
+```
+
+### 登出
+
+```javascript
+pb.authStore.clear();
+```
+
+### OAuth2 登录
+
+```javascript
+// GitHub 登录
+const authData = await pb.collection("users").authWithOAuth2({
+  provider: "github",
+  codeCallback: (url) => {
+    // 在应用内处理 OAuth 回调
+  },
+  redirectURL: "http://localhost:5173/auth/callback",
+  urlCallback: (url) => {
+    // 打开新窗口进行 OAuth
+    window.open(url, "_blank");
+  },
+});
+```
+
+## 实时功能
+
+PocketBase 内置 WebSocket 实时订阅功能。
+
+### 订阅变更
+
+```javascript
+// 订阅文章集合的所有变更
+pb.collection("posts").subscribe("*", (e) => {
+  console.log("Action:", e.action);
+  console.log("Record:", e.record);
+
+  switch (e.action) {
+    case "create":
+      console.log("新文章创建:", e.record.title);
+      break;
+    case "update":
+      console.log("文章更新:", e.record.title);
+      break;
+    case "delete":
+      console.log("文章删除:", e.record.id);
+      break;
+  }
+});
+
+// 订阅特定记录
+pb.collection("posts").subscribe("record_id", (e) => {
+  console.log("特定记录变更:", e.record);
+});
+
+// 取消订阅
+pb.collection("posts").unsubscribe();
+```
+
+### 实时示例
+
+```javascript
+// 聊天室实时消息
+pb.collection("messages").subscribe("*", (e) => {
+  if (e.action === "create") {
+    // 在界面显示新消息
+    displayMessage(e.record);
+  }
+});
+
+// 在线状态
+pb.collection("presences").subscribe("*", (e) => {
+  if (e.action === "create") {
+    updateUserOnlineStatus(e.record.userId, true);
+  } else if (e.action === "delete") {
+    updateUserOnlineStatus(e.record.userId, false);
+  }
+});
+```
+
+## 完整示例：博客前端
+
+```javascript
+import PocketBase from "pocketbase";
+
+const pb = new PocketBase("http://127.0.0.1:8090");
+
+// 状态管理
+let currentUser = null;
+let posts = [];
+
+// 初始化：检查登录状态
+function init() {
+  if (pb.authStore.isValid) {
+    currentUser = pb.authStore.model;
+    updateUI();
+  }
+  loadPosts();
+  subscribeToPosts();
+}
+
+// 加载文章
+async function loadPosts() {
+  try {
+    const result = await pb.collection("posts").getList(1, 20, {
+      filter: 'status = "published"',
+      sort: "-created",
+      expand: "author",
+    });
+    posts = result.items;
+    renderPosts();
+  } catch (error) {
+    console.error("加载失败:", error);
+  }
+}
+
+// 渲染文章列表
+function renderPosts() {
+  const container = document.getElementById("posts");
+  container.innerHTML = posts
+    .map(
+      (post) => `
+    <article class="post">
+      <h2>${post.title}</h2>
+      <p class="meta">
+        作者: ${post.expand.author?.name || "未知"}
+        | 日期: ${new Date(post.created).toLocaleDateString("zh-CN")}
+      </p>
+      <p>${post.excerpt}</p>
+      <a href="/posts/${post.id}">阅读更多</a>
+    </article>
+  `,
+    )
+    .join("");
+}
+
+// 订阅实时更新
+function subscribeToPosts() {
+  pb.collection("posts").subscribe("*", (e) => {
+    if (e.action === "create" && e.record.status === "published") {
+      posts.unshift(e.record);
+      renderPosts();
+      showNotification("新文章发布！");
+    }
+  });
+}
+
+// 登录
+async function login(email, password) {
+  try {
+    const authData = await pb
+      .collection("users")
+      .authWithPassword(email, password);
+    currentUser = authData.record;
+    updateUI();
+    return true;
+  } catch (error) {
+    alert("登录失败: " + error.message);
+    return false;
+  }
+}
+
+// 登出
+function logout() {
+  pb.authStore.clear();
+  currentUser = null;
+  updateUI();
+}
+
+// 更新 UI
+function updateUI() {
+  const authSection = document.getElementById("auth-section");
+  if (currentUser) {
+    authSection.innerHTML = `
+      <span>欢迎, ${currentUser.name}</span>
+      <button onclick="logout()">登出</button>
+    `;
+  } else {
+    authSection.innerHTML = `
+      <a href="/login">登录</a>
+      <a href="/register">注册</a>
+    `;
+  }
+}
+
+// 启动应用
+init();
+```
+
+## 下一步学习
+
+恭喜你完成了 PocketBase 入门学习！接下来可以：
+
+1. **深入学习关系查询**：了解如何处理复杂的数据关系
+2. **学习 API 规则**：掌握更精细的权限控制
+3. **探索文件上传**：实现图片、文件存储功能
+4. **使用 JS Hooks**：自定义后端逻辑
+5. **部署到生产环境**：学习 Docker、Nginx 部署方案
+
+## 参考资源
+
+- [PocketBase 官方文档](/docs)
+- [Docker 部署指南](/blog/pocketbase-docker-deployment)
+- [数据库设计最佳实践](/blog/pocketbase-database-design-best-practices)
+- [微信小程序登录](/blog/pocketbase-wechat-miniprogram-auth)
+- [生产部署清单](/blog/production-deployment-checklist)

@@ -1,0 +1,620 @@
+---
+title: 性能优化指南
+description: 优化 PocketBase 应用性能，提升响应速度和用户体验
+updatedDate: 2025-01-12
+difficulty: advanced
+---
+
+PocketBase 虽然轻量，但在生产环境中仍需注意性能优化。本文介绍从数据库到前端的全链路优化方案。
+
+## 数据库优化
+
+### 索引优化
+
+#### 为常用查询字段添加索引
+
+PocketBase 底层使用 SQLite，自动为以下字段创建索引：
+
+- `id`
+- `created`
+- `updated`
+
+为常用查询字段添加自定义索引：
+
+```javascript
+// pb_migrations/1736069523_add_indexes.js
+migrate((app) => {
+  const db = app.dao().db();
+
+  // 为外键字段创建索引
+  db.newQuery("CREATE INDEX IF NOT EXISTS idx_posts_author ON posts (author)");
+
+  // 为状态字段创建索引
+  db.newQuery("CREATE INDEX IF NOT EXISTS idx_posts_status ON posts (status)");
+
+  // 为组合查询创建复合索引
+  db.newQuery(
+    "CREATE INDEX IF NOT EXISTS idx_posts_status_created ON posts (status, created)",
+  );
+
+  // 为分类字段创建索引
+  db.newQuery(
+    "CREATE INDEX IF NOT EXISTS idx_posts_category ON posts (category)",
+  );
+
+  // 为标签查询创建索引（JSON 字段）
+  // SQLite 不支持直接索引 JSON，考虑使用关联表
+});
+
+drop((app) => {
+  const db = app.dao().db();
+  db.newQuery("DROP INDEX IF EXISTS idx_posts_author");
+  db.newQuery("DROP INDEX IF EXISTS idx_posts_status");
+  db.newQuery("DROP INDEX IF EXISTS idx_posts_status_created");
+  db.newQuery("DROP INDEX IF EXISTS idx_posts_category");
+});
+```
+
+#### 索引设计原则
+
+| 场景       | 索引策略             | 示例                                |
+| ---------- | -------------------- | ----------------------------------- |
+| 单字段查询 | 创建单列索引         | `WHERE status = 'published'`        |
+| 排序查询   | 包含排序字段         | `ORDER BY created DESC`             |
+| 组合查询   | 创建复合索引         | `WHERE status = ? AND category = ?` |
+| 前缀搜索   | 使用 LIKE 前缀       | `WHERE title LIKE 'keyword%'`       |
+| 全文搜索   | 使用 FTS5 或外部服务 | `WHERE content MATCH 'search'`      |
+
+### 数据库连接池
+
+PocketBase 使用单个数据库连接，对于高并发场景：
+
+```javascript
+// 使用连接池（需要手动实现）
+const { createPool } = require("better-sqlite3-pool");
+
+const db = createPool({
+  filename: "./pb_data/data.db",
+  // 配置池大小
+  max: 10, // 最大连接数
+  min: 2, // 最小连接数
+  idle: 10000, // 空闲超时
+});
+```
+
+### VACUUM 和 ANALYZE
+
+定期维护数据库：
+
+```javascript
+// pb_hooks/schedule.cjs
+module.exports = (router) => {
+  // 每天凌晨 3 点执行
+  router.schedule("0 3 * * *", async (c) => {
+    const db = c.app.dao().db();
+
+    // 优化数据库（回收空间）
+    db.newQuery("VACUUM");
+
+    // 更新统计信息
+    db.newQuery("ANALYZE");
+
+    return { success: true };
+  });
+};
+```
+
+## 查询优化
+
+### 筛选条件优化
+
+#### 使用高效的操作符
+
+```javascript
+// 不推荐：使用 OR
+const bad = await pb.collection("posts").getFullList({
+  filter: "status = 'published' OR status = 'draft'",
+});
+
+// 推荐：使用 IN
+const good = await pb.collection("posts").getFullList({
+  filter: "status IN ('published', 'draft')",
+});
+```
+
+#### 避免在索引字段上使用函数
+
+```javascript
+// 不推荐：函数破坏索引
+const bad = await pb.collection("posts").getFullList({
+  filter: "lower(title) LIKE 'example%'",
+});
+
+// 推荐：存储时统一格式
+const good = await pb.collection("posts").getFullList({
+  filter: "title LIKE 'Example%'",
+});
+```
+
+### 分页优化
+
+#### 使用游标分页替代偏移分页
+
+```javascript
+// 传统偏移分页（大数据集时性能差）
+const page1 = await pb.collection("posts").getList(1, 20);
+const page2 = await pb.collection("posts").getList(2, 20); // 需要跳过前 20 条
+
+// 游标分页（性能更好）
+const page1 = await pb.collection("posts").getList(1, 20, {
+  sort: "-created",
+});
+
+// 获取下一页（使用最后一条记录的 created 时间）
+const lastCreated = page1.items[page1.items.length - 1].created;
+const page2 = await pb.collection("posts").getList(1, 20, {
+  filter: `created < '${lastCreated}'`,
+  sort: "-created",
+});
+```
+
+#### 使用 getFullList 的批量处理
+
+```javascript
+// 不推荐：一次性获取所有数据
+const allPosts = await pb.collection("posts").getFullList(); // 可能很慢
+
+// 推荐：分批处理
+const batchSize = 100;
+let page = 1;
+let hasMore = true;
+
+while (hasMore) {
+  const result = await pb.collection("posts").getList(page, batchSize);
+  // 处理当前批次
+  processBatch(result.items);
+
+  hasMore = result.items.length === batchSize;
+  page++;
+}
+```
+
+### Expand 优化
+
+#### 避免过度 Expand
+
+```javascript
+// 不推荐：Expand 所有关联
+const bad = await pb.collection("posts").getFullList({
+  expand: "author,author.profile,category,tags",
+});
+
+// 推荐：按需 Expand
+const good = await pb.collection("posts").getFullList({
+  expand: "author", // 只 Expand 必要的关联
+});
+```
+
+#### 使用视图字段替代 Expand
+
+对于简单关联，可以在主表中存储冗余字段：
+
+```javascript
+// 文章表包含作者的 name 字段（冗余）
+{
+  id: "xxx",
+  title: "文章标题",
+  author: "user_id",  // 关联 ID
+  authorName: "作者名", // 冗余字段，避免每次 expand
+}
+
+// 查询时不需要 expand
+const posts = await pb.collection('posts').getFullList();
+```
+
+## 缓存策略
+
+### HTTP 缓存配置
+
+```javascript
+// pb_hooks/rules.cjs
+// 为公开数据设置缓存
+router.add("*", (c) => {
+  if (c.path.startsWith("/api/collections/posts/records")) {
+    c.cacheControl("public, max-age=300"); // 5 分钟
+  }
+  if (c.path.startsWith("/api/files/")) {
+    c.cacheControl("public, max-age=86400"); // 24 小时（文件）
+  }
+});
+```
+
+### 响应压缩
+
+```javascript
+// 启用 gzip 压缩
+const pocketbase = require("pocketbase")();
+
+pocketbase.beforeServe((context) => {
+  context.response.headers.set("Content-Encoding", "gzip");
+});
+```
+
+### Redis 缓存集成
+
+```javascript
+// lib/cache.js
+const Redis = require("ioredis");
+
+class CacheService {
+  constructor() {
+    this.redis = new Redis({
+      host: "localhost",
+      port: 6379,
+      db: 0,
+    });
+  }
+
+  async get(key) {
+    const cached = await this.redis.get(key);
+    return cached ? JSON.parse(cached) : null;
+  }
+
+  async set(key, value, ttl = 300) {
+    await this.redis.setex(key, ttl, JSON.stringify(value));
+  }
+
+  async del(key) {
+    await this.redis.del(key);
+  }
+
+  async invalidate(pattern) {
+    const keys = await this.redis.keys(pattern);
+    if (keys.length > 0) {
+      await this.redis.del(...keys);
+    }
+  }
+
+  // 生成缓存键
+  buildKey(collection, filter, expand) {
+    return `pb:${collection}:${filter || ""}:${expand || ""}`;
+  }
+}
+
+module.exports = new CacheService();
+```
+
+### 在 Hook 中使用缓存
+
+```javascript
+// pb_hooks/records.cjs
+const cache = require("../lib/cache");
+
+onRecordListViewRequest((e) => {
+  const cacheKey = cache.buildKey(e.collection.name, e.search, e.expand);
+
+  // 尝试从缓存获取
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    return e.json(200, cached);
+  }
+
+  // 继续执行，在响应钩子中缓存结果
+  e.httpContext.set("cacheKey", cacheKey);
+});
+
+onRecordListViewResponse((e) => {
+  const cacheKey = e.httpContext.get("cacheKey");
+  if (cacheKey) {
+    // 缓存结果 5 分钟
+    cache.set(cacheKey, e.output, 300);
+  }
+});
+
+onRecordChangeRequest((e) => {
+  // 数据变更时清除缓存
+  const pattern = `pb:${e.collection.name}:*`;
+  cache.invalidate(pattern);
+});
+```
+
+## 文件优化
+
+### 文件存储优化
+
+#### 使用 CDN
+
+```javascript
+// 配置文件 URL 前缀
+const pb = new PocketBase("https://api.example.com");
+
+// 替换文件 URL 为 CDN 地址
+pb.files.getTokenUrl = function (record, filename, options) {
+  const baseUrl = "https://cdn.example.com";
+  const token = options?.token || this.files.getToken();
+  return `${baseUrl}/api/files/${record.collectionId}/${record.id}/${filename}?token=${token}`;
+};
+```
+
+#### 图片缩略图
+
+```javascript
+// 获取缩略图 URL
+function getThumbUrl(record, filename, size = "300x300") {
+  return pb.files.getUrl(record, filename, { thumb: size });
+}
+
+// 使用示例
+const thumbUrl = getThumbUrl(post, post.cover, "400x300");
+const fullUrl = pb.files.getUrl(post, post.cover);
+```
+
+### 文件上传优化
+
+#### 前端压缩
+
+```javascript
+async function compressImage(file, quality = 0.8) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+
+    reader.onload = (e) => {
+      const img = new Image();
+      img.src = e.target.result;
+
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+
+        // 计算新尺寸（最大 1920px）
+        const maxSize = 1920;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxSize) {
+            height = (height * maxSize) / width;
+            width = maxSize;
+          }
+        } else {
+          if (height > maxSize) {
+            width = (width * maxSize) / height;
+            height = maxSize;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // 导出压缩后的图片
+        canvas.toBlob(
+          (blob) => {
+            resolve(new File([blob], file.name, { type: file.type }));
+          },
+          "image/jpeg",
+          quality,
+        );
+      };
+    };
+  });
+}
+
+// 使用
+const compressed = await compressImage(originalFile, 0.7);
+```
+
+#### 分片上传
+
+```javascript
+async function uploadInChunks(file, chunkSize = 1024 * 1024) {
+  const chunks = Math.ceil(file.size / chunkSize);
+  const uploadId = generateUploadId();
+
+  for (let i = 0; i < chunks; i++) {
+    const start = i * chunkSize;
+    const end = Math.min((i + 1) * chunkSize, file.size);
+    const chunk = file.slice(start, end);
+
+    const formData = new FormData();
+    formData.append("chunk", chunk);
+    formData.append("uploadId", uploadId);
+    formData.append("chunkIndex", i);
+    formData.append("totalChunks", chunks);
+
+    await pb.send("/api/upload-chunk", {
+      method: "POST",
+      body: formData,
+    });
+  }
+
+  // 合并分片
+  return await pb.send("/api/merge-chunks", {
+    method: "POST",
+    body: JSON.stringify({ uploadId, filename: file.name }),
+  });
+}
+```
+
+## 前端优化
+
+### 请求合并
+
+```javascript
+// 批量获取多条记录
+async function batchGet(ids) {
+  const filter = ids.map((id, i) => `id = '${id}'`).join(" || ");
+  return await pb.collection("posts").getFullList({ filter });
+}
+
+// 使用
+const posts = await batchGet(["id1", "id2", "id3"]);
+```
+
+### 防抖和节流
+
+```javascript
+// 搜索输入防抖
+import { debounce } from "lodash-es";
+
+const search = debounce(async (query) => {
+  const results = await pb.collection("posts").getFullList({
+    filter: `title ~ "${query}"`,
+  });
+  return results;
+}, 300);
+```
+
+### 虚拟滚动
+
+```vue
+<script setup>
+import { useVirtualList } from "@vueuse/core";
+
+const { data } = await pb.collection("posts").getFullList();
+
+const { list, containerProps, wrapperProps } = useVirtualList(data, {
+  itemHeight: 100, // 每项高度
+  overscan: 5, // 预渲染数量
+});
+</script>
+
+<template>
+  <div v-bind="containerProps" style="height: 500px; overflow: auto;">
+    <div v-bind="wrapperProps">
+      <div v-for="item in list" :key="item.data.id" style="height: 100px;">
+        {{ item.data.title }}
+      </div>
+    </div>
+  </div>
+</template>
+```
+
+## 实时订阅优化
+
+### 精确订阅
+
+```javascript
+// 不推荐：订阅所有变化
+pb.collection("posts").subscribe("*", (e) => {
+  console.log(e);
+});
+
+// 推荐：只订阅特定记录
+pb.collection("posts").subscribe('id = "xxx"', (e) => {
+  console.log(e);
+});
+
+// 推荐：只订阅特定操作
+pb.collection("posts").subscribe('action = "create"', (e) => {
+  console.log("新创建:", e.record);
+});
+```
+
+### 批量处理实时事件
+
+```javascript
+const eventQueue = [];
+let processing = false;
+
+pb.collection("posts").subscribe("*", (e) => {
+  eventQueue.push(e);
+  processQueue();
+});
+
+async function processQueue() {
+  if (processing) return;
+  processing = true;
+
+  // 等待一小段时间，收集更多事件
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  const batch = eventQueue.splice(0, 100);
+  // 批量处理
+  await processBatch(batch);
+
+  processing = false;
+  if (eventQueue.length > 0) {
+    processQueue();
+  }
+}
+```
+
+## 监控与分析
+
+### 慢查询日志
+
+```javascript
+// pb_hooks/afterRequest.cjs
+onAfterRoute((e) => {
+  const duration = Date.now() - e.httpContext.get("startTime");
+
+  if (duration > 1000) {
+    console.warn(`Slow request: ${e.httpContext.request.url} (${duration}ms)`);
+  }
+});
+
+onBeforeRoute((e) => {
+  e.httpContext.set("startTime", Date.now());
+});
+```
+
+### 数据库查询分析
+
+```javascript
+// 启用 SQLite 查询日志
+onRecordListViewRequest((e) => {
+  const startTime = Date.now();
+
+  e.httpContext.on("after", () => {
+    const duration = Date.now() - startTime;
+    if (duration > 500) {
+      console.warn(`Slow query: ${e.collection.name} (${duration}ms)`);
+      console.warn(`Filter: ${e.search}`);
+      console.warn(`Expand: ${e.expand}`);
+    }
+  });
+});
+```
+
+## 性能检查清单
+
+### 数据库
+
+- [ ] 为常用查询字段添加索引
+- [ ] 定期执行 VACUUM 和 ANALYZE
+- [ ] 避免在 WHERE 子句中使用函数
+- [ ] 使用 IN 替代 OR
+- [ ] 限制返回字段（避免 SELECT \*）
+
+### 查询
+
+- [ ] 使用分页而非全量获取
+- [ ] 避免深度 expand
+- [ ] 使用游标分页替代偏移分页
+- [ ] 缓存热点数据
+- [ ] 批量操作而非循环单个请求
+
+### 文件
+
+- [ ] 配置 CDN
+- [ ] 使用缩略图
+- [ ] 前端压缩图片
+- [ ] 大文件分片上传
+- [ ] 设置合适的缓存头
+
+### 实时
+
+- [ ] 精确订阅而非全部
+- [ ] 批量处理实时事件
+- [ ] 小程序使用轮询替代 WebSocket
+- [ ] 及时取消不再需要的订阅
+
+### 前端
+
+- [ ] 使用虚拟滚动处理长列表
+- [ ] 输入搜索使用防抖
+- [ ] 合并多个请求
+- [ ] 缓存 API 响应
+- [ ] 预加载关键数据

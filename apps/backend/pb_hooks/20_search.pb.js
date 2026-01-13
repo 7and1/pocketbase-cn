@@ -116,6 +116,19 @@ routerAdd("POST", "/api/admin/search/init-fts", function (c) {
 });
 
 routerAdd("GET", "/api/search", function (c) {
+  var resp = null;
+  var log = null;
+  try {
+    resp = require(__hooks + "/lib/response.js");
+    log = require(__hooks + "/lib/logger.js");
+  } catch (_) {
+    return c.json(500, { error: "Failed to load helpers" });
+  }
+
+  var ctx = log.withRequestContext(c, { endpoint: "search" });
+  var perf = log.createPerfContext();
+  ctx.perf = perf;
+
   var info = c.requestInfo() || {};
   var q = info.query && info.query.q ? String(info.query.q) : "";
   q = q.replace(/^\s+|\s+$/g, "");
@@ -130,12 +143,7 @@ routerAdd("GET", "/api/search", function (c) {
   if (limit > 100) limit = 100;
 
   if (!q || q.length < 2) {
-    return c.json(400, {
-      error: {
-        code: "INVALID_QUERY",
-        message: "Query must be at least 2 characters",
-      },
-    });
+    return resp.badRequest(c, "Query must be at least 2 characters");
   }
 
   var data = { plugins: [], showcase: [] };
@@ -143,6 +151,7 @@ routerAdd("GET", "/api/search", function (c) {
   // Use CASE-INSENSITIVE search with better performance
   // The ~ operator in PocketBase is case-insensitive LIKE
   var searchQ = q.toLowerCase();
+  log.addCheckpoint(perf, "validation_complete");
 
   if (type === "all" || type === "plugins") {
     var plugins = $app.findRecordsByFilter(
@@ -166,6 +175,8 @@ routerAdd("GET", "/api/search", function (c) {
     }
   }
 
+  log.addCheckpoint(perf, "plugins_search_complete");
+
   if (type === "all" || type === "showcase") {
     var showcases = $app.findRecordsByFilter(
       "showcase",
@@ -188,6 +199,8 @@ routerAdd("GET", "/api/search", function (c) {
     }
   }
 
+  log.addCheckpoint(perf, "showcase_search_complete");
+
   // Add cache headers for search results
   try {
     if (c.response && c.response.header) {
@@ -197,12 +210,34 @@ routerAdd("GET", "/api/search", function (c) {
     }
   } catch (_) {}
 
-  return c.json(200, { data: data });
+  log.info(ctx, "Search completed", {
+    query: q.substring(0, 50),
+    type: type,
+    pluginCount: data.plugins.length,
+    showcaseCount: data.showcase.length,
+  });
+
+  return resp.success(c, data, {
+    elapsed: log.getElapsed(perf) + "ms",
+  });
 });
 
 // FTS5-powered search endpoint (faster for large datasets)
 // Falls back to LIKE search if FTS tables don't exist
 routerAdd("GET", "/api/search/fts", function (c) {
+  var resp = null;
+  var log = null;
+  try {
+    resp = require(__hooks + "/lib/response.js");
+    log = require(__hooks + "/lib/logger.js");
+  } catch (_) {
+    return c.json(500, { error: "Failed to load helpers" });
+  }
+
+  var ctx = log.withRequestContext(c, { endpoint: "search_fts" });
+  var perf = log.createPerfContext();
+  ctx.perf = perf;
+
   var info = c.requestInfo() || {};
   var q = info.query && info.query.q ? String(info.query.q) : "";
   q = q.replace(/^\s+|\s+$/g, "");
@@ -217,15 +252,11 @@ routerAdd("GET", "/api/search/fts", function (c) {
   if (limit > 100) limit = 100;
 
   if (!q || q.length < 2) {
-    return c.json(400, {
-      error: {
-        code: "INVALID_QUERY",
-        message: "Query must be at least 2 characters",
-      },
-    });
+    return resp.badRequest(c, "Query must be at least 2 characters");
   }
 
   var data = { plugins: [], showcase: [] };
+  log.addCheckpoint(perf, "validation_complete");
 
   // Try FTS5 search first, fall back to LIKE if FTS not available
   var useFts = true;
@@ -246,6 +277,7 @@ routerAdd("GET", "/api/search/fts", function (c) {
         pluginIds.push(ftsResults[i].rowid);
       }
     }
+    log.addCheckpoint(perf, "fts_plugins_complete");
 
     if (type === "all" || type === "showcase") {
       var ftsSql2 =
@@ -259,10 +291,13 @@ routerAdd("GET", "/api/search/fts", function (c) {
         showcaseIds.push(ftsResults2[j].rowid);
       }
     }
+    log.addCheckpoint(perf, "fts_showcase_complete");
   } catch (err) {
     // FTS not available, fall back to LIKE search
     useFts = false;
-    console.log("[SEARCH] FTS not available, using LIKE fallback");
+    log.warn(ctx, "FTS not available, using LIKE fallback", {
+      error: String(err),
+    });
   }
 
   if (useFts) {
@@ -371,6 +406,8 @@ routerAdd("GET", "/api/search/fts", function (c) {
     }
   }
 
+  log.addCheckpoint(perf, "fetch_complete");
+
   // Add cache headers for search results
   try {
     if (c.response && c.response.header) {
@@ -380,5 +417,16 @@ routerAdd("GET", "/api/search/fts", function (c) {
     }
   } catch (_) {}
 
-  return c.json(200, { data: data, meta: { fts: useFts } });
+  log.info(ctx, "FTS search completed", {
+    query: q.substring(0, 50),
+    type: type,
+    ftsUsed: useFts,
+    pluginCount: data.plugins.length,
+    showcaseCount: data.showcase.length,
+  });
+
+  return resp.success(c, data, {
+    fts: useFts,
+    elapsed: log.getElapsed(perf) + "ms",
+  });
 });

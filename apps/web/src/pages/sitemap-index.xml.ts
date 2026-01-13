@@ -9,6 +9,7 @@ export async function GET() {
     { loc: `${SITE_URL}/sitemap-blog.xml`, lastmod: now },
     { loc: `${SITE_URL}/sitemap-plugins.xml`, lastmod: now },
     { loc: `${SITE_URL}/sitemap-showcase.xml`, lastmod: now },
+    { loc: `${SITE_URL}/sitemap-images.xml`, lastmod: now },
   ];
 
   const sitemapIndex = `

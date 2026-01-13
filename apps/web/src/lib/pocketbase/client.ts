@@ -75,7 +75,9 @@ async function fetchCsrfToken(): Promise<string> {
 export const pb = getPocketBase();
 
 // Test exports - only available in test environment
-if (import.meta.env?.MODE === "test" || typeof vi !== "undefined") {
+// @ts-ignore - vitest global
+const isVitestEnvironment = typeof vi !== "undefined";
+if (import.meta.env?.MODE === "test" || isVitestEnvironment) {
   try {
     // @ts-expect-error - test-only exports
     pb.__mockAuthStore = pbInstance?.authStore;

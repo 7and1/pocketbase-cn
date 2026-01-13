@@ -59,6 +59,29 @@ function getContextRequestId(c) {
   return generateRequestId();
 }
 
+// Performance tracking context
+function createPerfContext() {
+  return {
+    startTime: Date.now(),
+    checkpoints: [],
+  };
+}
+
+function addCheckpoint(perfCtx, name) {
+  if (!perfCtx) return;
+  var now = Date.now();
+  perfCtx.checkpoints.push({
+    name: name,
+    elapsed: now - perfCtx.startTime,
+    timestamp: now,
+  });
+}
+
+function getElapsed(perfCtx) {
+  if (!perfCtx || !perfCtx.startTime) return 0;
+  return Date.now() - perfCtx.startTime;
+}
+
 // Format log entry as JSON
 function formatLogEntry(level, context, message, data) {
   var entry = {
@@ -67,7 +90,24 @@ function formatLogEntry(level, context, message, data) {
     msg: message || "",
   };
 
-  if (context) entry.ctx = context;
+  if (context) {
+    // Add performance timing if available
+    if (context.perf) {
+      entry.elapsed = getElapsed(context.perf);
+      if (context.perf.checkpoints && context.perf.checkpoints.length > 0) {
+        entry.checkpoints = context.perf.checkpoints;
+      }
+    }
+    // Add request ID if available
+    if (context.reqId) entry.reqId = context.reqId;
+    // Include other context fields
+    for (var key in context) {
+      if (key !== "perf" && key !== "reqId" && context.hasOwnProperty(key)) {
+        entry.ctx = entry.ctx || {};
+        entry.ctx[key] = context[key];
+      }
+    }
+  }
   if (data) entry.data = data;
 
   try {
@@ -119,6 +159,13 @@ function logError(message, data) {
   error(null, message, data);
 }
 
+// Helper to create request context with logging
+function withRequestContext(c, extra) {
+  var ctx = extra || {};
+  ctx.reqId = getContextRequestId(c);
+  return ctx;
+}
+
 module.exports = {
   debug: debug,
   info: info,
@@ -130,5 +177,9 @@ module.exports = {
   logError: logError,
   getContextRequestId: getContextRequestId,
   generateRequestId: generateRequestId,
+  createPerfContext: createPerfContext,
+  addCheckpoint: addCheckpoint,
+  getElapsed: getElapsed,
+  withRequestContext: withRequestContext,
   LEVELS: LEVELS,
 };

@@ -1,0 +1,844 @@
+---
+title: "PocketBase 数据库设计最佳实践"
+description: "深入探讨 PocketBase 数据库设计原则，包括关系设计、索引优化、数据迁移和生产环境最佳实践。"
+excerpt: "良好的数据库设计是应用成功的基础。本文将详细介绍 PocketBase 数据库设计的核心原则、关系设计模式、性能优化技巧，以及生产环境中的数据迁移策略。"
+publishDate: 2025-01-13
+category: "数据库设计"
+tags: ["数据库", "性能优化", "设计模式", "生产环境"]
+author: "PocketBase.cn"
+featured: true
+difficulty: "intermediate"
+---
+
+## 目录
+
+1. [设计原则](#设计原则)
+2. [字段类型选择](#字段类型选择)
+3. [关系设计](#关系设计)
+4. [索引优化](#索引优化)
+5. [数据验证](#数据验证)
+6. [数据迁移](#数据迁移)
+7. [性能优化](#性能优化)
+8. [生产环境建议](#生产环境建议)
+
+## 设计原则
+
+### 核心设计原则
+
+```
+┌─────────────────────────────────────────────────────────┐
+│              PocketBase 数据库设计原则                    │
+├─────────────────────────────────────────────────────────┤
+│  1. 简单优先     │  避免过度设计，从简单开始              │
+│  2. 关系清晰     │  明确定义实体间的关系                  │
+│  3. 查询优化     │  根据查询模式设计数据结构              │
+│  4. 可扩展性     │  预留扩展空间，避免频繁重构            │
+│  5. 数据完整性   │  通过规则和约束保证数据质量            │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 1. 简单优先原则
+
+**从简单的开始，根据需求演进**
+
+```
+初期设计                          演进后
+┌─────────────┐                  ┌─────────────┐
+│   users     │                  │   users     │
+│  - id       │                  │  - id       │
+│  - name     │                  │  - name     │
+│  - email    │      ──────>     │  - email    │
+│             │                  │  - role     │
+└─────────────┘                  │  - status   │
+                                 └─────────────┘
+```
+
+### 2. 单一职责原则
+
+每个集合应该只负责一个实体的数据。
+
+```javascript
+// 不好的设计：混合多种数据
+collection: users
+├── id
+├── name
+├── email
+├── posts[]          // 文章应该独立
+├── orders[]         // 订单应该独立
+└── settings{}       // 设置可以独立
+
+// 好的设计：职责分离
+collections:
+├── users            // 用户基础信息
+├── posts            // 文章
+├── orders           // 订单
+└── user_settings    // 用户设置
+```
+
+### 3. 规范化与反规范化权衡
+
+| 场景           | 规范化       | 反规范化   |
+| -------------- | ------------ | ---------- |
+| **写入频繁**   | 推荐         | 不推荐     |
+| **读取频繁**   | 可选         | 推荐       |
+| **数据一致性** | 强一致性     | 最终一致性 |
+| **查询复杂度** | 需要多表查询 | 单表查询   |
+
+```javascript
+// 规范化设计
+authors:
+  - id
+  - name
+  - email
+  - bio
+
+posts:
+  - id
+  - title
+  - content
+  - author (relation: authors)
+
+// 反规范化设计（适合读多写少）
+posts:
+  - id
+  - title
+  - content
+  - author (relation: authors)
+  - authorName (冗余，用于快速显示)
+  - authorAvatar (冗余)
+```
+
+## 字段类型选择
+
+### PocketBase 字段类型
+
+| 类型                | 说明      | 使用场景       | 示例值                |
+| ------------------- | --------- | -------------- | --------------------- |
+| **text**            | 单行文本  | 短字符串       | "产品经理"            |
+| **editor**          | 多行文本  | 长文本、富文本 | "这是一篇长文章..."   |
+| **number**          | 数值      | 整数、小数     | 99.99                 |
+| **email**           | 邮箱      | 邮箱地址       | "user@example.com"    |
+| **url**             | URL 链接  | 网址           | "https://example.com" |
+| **bool**            | 布尔值    | 是/否          | true                  |
+| **select**          | 单选      | 预定义选项     | "published"           |
+| **multiple-select** | 多选      | 多个预定义选项 | `["tag1", "tag2"]`    |
+| **date**            | 日期时间  | 时间戳         | "2025-01-13 10:00:00" |
+| **relation**        | 关系      | 关联其他集合   | 关联 ID               |
+| **file**            | 文件      | 上传文件       | 文件名                |
+| **json**            | JSON 数据 | 复杂结构数据   | `{"key": "value"}`    |
+
+### 类型选择建议
+
+#### 1. 文本类型选择
+
+```
+text vs editor vs json
+
+┌─────────────────┬─────────────────┬─────────────────┐
+│     text        │     editor      │      json       │
+├─────────────────┼─────────────────┼─────────────────┤
+│  标题、名称      │  文章内容       │  配置、元数据    │
+│  简短描述        │  评论、回复     │  复杂嵌套结构    │
+│  标签、分类      │  富文本         │  灵活数据        │
+│  < 500 字符      │  > 500 字符     │  结构化数据      │
+└─────────────────┴─────────────────┴─────────────────┘
+```
+
+```javascript
+// 好的设计
+posts:
+  - title (text)          // 标题
+  - slug (text)           // URL 友好标识
+  - content (editor)      // 内容
+  - excerpt (text)        // 摘要
+  - metadata (json)       // SEO 元数据
+
+// metadata 内容示例
+{
+  "seo_title": "SEO 标题",
+  "description": "SEO 描述",
+  "keywords": ["keyword1", "keyword2"],
+  "og_image": "https://..."
+}
+```
+
+#### 2. 数值类型选择
+
+```javascript
+// 使用 number 的场景
+products: -price(number) - // 价格：99.99
+  stock(number) - // 库存：100
+  weight(number); // 重量：1.5
+
+// 状态类数据使用 select
+orders: -status(select) - // pending, paid, shipped, delivered
+  paymentStatus(select); // unpaid, paid, refunded
+```
+
+#### 3. 日期字段设计
+
+```javascript
+// 标准日期字段设计
+posts: -publishDate(date) - // 发布日期
+  created(date) - // 创建时间（系统）
+  updated(date); // 更新时间（系统）
+
+// 日期范围查询
+pb.collection("posts").getList(1, 20, {
+  filter: 'publishDate >= "2025-01-01" && publishDate <= "2025-12-31"',
+});
+```
+
+## 关系设计
+
+### 1. 一对一关系
+
+```javascript
+// 用户配置
+users:
+  - id
+  - name
+  - email
+
+user_profiles:
+  - id
+  - user (relation: users, one)  // 一对一
+  - bio
+  - avatar
+  - location
+
+// 查询示例
+pb.collection('user_profiles').getFirstListItem(
+  'user = "user_id_here"',
+  { expand: 'user' }
+);
+```
+
+### 2. 一对多关系
+
+```javascript
+// 作者和文章
+authors:
+  - id
+  - name
+  - email
+
+posts:
+  - id
+  - title
+  - author (relation: authors, many)  // 一对多
+
+// 查询作者的所有文章
+pb.collection('posts').getList(1, 50, {
+  filter: 'author = "author_id_here"',
+  expand: 'author'
+});
+
+// 查询文章及其作者
+pb.collection('posts').getList(1, 20, {
+  expand: 'author'
+});
+```
+
+### 3. 多对多关系
+
+```javascript
+// 文章和标签
+posts:
+  - id
+  - title
+  - tags (relation: tags, many)  // 多对多
+
+tags:
+  - id
+  - name
+  - slug
+
+// 通过 expand 获取关联
+pb.collection('posts').getList(1, 20, {
+  expand: 'tags'
+});
+
+// 查询包含特定标签的文章
+pb.collection('posts').getList(1, 20, {
+  filter: 'tags ~ "tag_id_here"',
+  expand: 'tags'
+});
+```
+
+### 4. 关系设计最佳实践
+
+#### 使用中间表处理复杂关系
+
+```javascript
+// 多对多关系的中间表
+posts:
+  - id
+  - title
+  - content
+
+categories:
+  - id
+  - name
+  - slug
+
+post_categories:  // 中间表
+  - id
+  - post (relation: posts)
+  - category (relation: categories)
+  - order (number)  // 排序
+
+// 查询文章的所有分类
+pb.collection('post_categories').getFullList({
+  filter: 'post = "post_id_here"',
+  expand: 'category'
+});
+```
+
+#### 自引用关系
+
+```javascript
+// 分类层级结构
+categories:
+  - id
+  - name
+  - slug
+  - parent (relation: categories, optional)  // 自引用
+  - children (virtual, 通过 parent 反向查询)
+
+// 查询子分类
+pb.collection('categories').getFullList({
+  filter: 'parent = "parent_id_here"'
+});
+
+// 评论嵌套
+comments:
+  - id
+  - content
+  - author (relation: users)
+  - post (relation: posts)
+  - parent (relation: comments, optional)  // 回复的评论
+```
+
+## 索引优化
+
+### 1. 理解 SQLite 索引
+
+PocketBase 使用 SQLite，索引对查询性能至关重要：
+
+```sql
+-- 自动创建的索引
+-- 主键 id 自动索引
+-- relation 字段自动创建索引
+
+-- 手动创建索引（通过 SQL 或 PocketBase 迁移）
+CREATE INDEX idx_posts_status ON posts(status);
+CREATE INDEX idx_posts_author ON posts(author);
+CREATE INDEX idx_posts_created ON posts(created);
+```
+
+### 2. 索引使用场景
+
+```javascript
+// 需要索引的场景
+
+// 1. 频繁用于过滤的字段
+posts:
+  - status (需要索引)
+  - author (relation，自动索引)
+  - category (需要索引)
+
+// 2. 排序字段
+posts:
+  - created (需要索引，用于排序)
+  - publishedAt (需要索引)
+
+// 3. 唯一性约束
+users:
+  - email (唯一索引)
+  - username (唯一索引)
+
+// 通过迁移创建唯一索引
+```
+
+### 3. 复合索引
+
+```javascript
+// 多字段组合查询的索引
+
+// 查询模式
+pb.collection('posts').getList(1, 20, {
+  filter: 'status = "published" && author = "author_id"',
+  sort: '-created'
+});
+
+// 创建复合索引
+CREATE INDEX idx_posts_status_author_created
+ON posts(status, author, created DESC);
+```
+
+### 4. 索引优化建议
+
+| 建议               | 说明                       |
+| ------------------ | -------------------------- |
+| **不要过度索引**   | 索引会降低写入性能         |
+| **选择性高的字段** | 优先为选择性高的字段建索引 |
+| **复合索引顺序**   | 将选择性高的字段放在前面   |
+| **覆盖索引**       | 包含查询所需的所有字段     |
+
+## 数据验证
+
+### 1. API 规则验证
+
+```javascript
+// 集合级别的访问控制
+posts:
+
+// Create 规则
+@request.auth.id != ""  // 必须登录
+
+// List 规则
+status = "published" || @request.auth.id = author
+// 公开文章可见，作者可见所有文章
+
+// View 规则
+status = "published" || @request.auth.id = author
+
+// Update 规则
+@request.auth.id = author || @request.auth.role = "admin"
+
+// Delete 规则
+@request.auth.id = author || @request.auth.role = "admin"
+```
+
+### 2. 字段级验证
+
+```javascript
+// 使用 JS Hook 进行复杂验证
+
+// pb_hooks/validators.js
+routerAdd("POST", "/api/posts", (c) => {
+  const data = c.request().body;
+
+  // 标题长度验证
+  if (!data.title || data.title.length < 5 || data.title.length > 100) {
+    return c.json(400, {
+      error: "标题长度必须在 5-100 字符之间",
+    });
+  }
+
+  // 内容验证
+  if (!data.content || data.content.length < 10) {
+    return c.json(400, {
+      error: "内容不能少于 10 个字符",
+    });
+  }
+
+  // 分类验证
+  const allowedCategories = ["技术", "生活", "随想"];
+  if (!allowedCategories.includes(data.category)) {
+    return c.json(400, {
+      error: "无效的分类",
+    });
+  }
+
+  // 继续处理...
+});
+```
+
+### 3. 默认值设置
+
+```javascript
+// 使用 Hook 设置默认值
+
+// pb_hooks/hooks.js
+onRecordBeforeCreateRequest((e) => {
+  const record = e.record;
+  const collection = record.collection();
+
+  if (collection.id === "posts") {
+    // 设置默认状态
+    if (!record.getString("status")) {
+      record.set("status", "draft");
+    }
+
+    // 设置默认日期
+    if (!record.getString("publishDate")) {
+      record.set("publishDate", new Date().toISOString());
+    }
+
+    // 设置作者
+    record.set("author", e.requestInfo.authRecord.id);
+  }
+}, "posts");
+```
+
+## 数据迁移
+
+### 1. 迁移文件结构
+
+```
+pb_migrations/
+├── 1705123456_create_posts_collection.js
+├── 1705123457_add_slug_field.js
+├── 1705123458_create_index_on_status.js
+└── 1705123459_migrate_author_data.js
+```
+
+### 2. 迁移文件示例
+
+```javascript
+// pb_migrations/1705123456_create_posts_collection.js
+
+/// <reference path="../pb_data/types.d.ts" />
+
+/**
+ * 创建文章集合
+ */
+migration((app) => {
+  const collection = new Collection({
+    id: "collection_id_here",
+    name: "posts",
+    type: "base",
+    schema: [
+      {
+        id: "field_id_title",
+        name: "title",
+        type: "text",
+        required: true,
+        options: {
+          min: 5,
+          max: 200,
+        },
+      },
+      {
+        id: "field_id_content",
+        name: "content",
+        type: "editor",
+        required: true,
+      },
+      {
+        id: "field_id_status",
+        name: "status",
+        type: "select",
+        required: true,
+        options: {
+          values: ["draft", "published", "archived"],
+        },
+      },
+      {
+        id: "field_id_author",
+        name: "author",
+        type: "relation",
+        required: true,
+        options: {
+          collectionId: "_pb_users_auth_",
+          maxSelect: 1,
+        },
+      },
+    ],
+    listRule: 'status = "published" || @request.auth.id = author',
+    viewRule: 'status = "published" || @request.auth.id = author',
+    createRule: '@request.auth.id != ""',
+    updateRule: "@request.auth.id = author",
+    deleteRule: "@request.auth.id = author",
+  });
+
+  const dao = new Dao(app);
+  dao.saveCollection(collection);
+});
+
+/// <reference path="../pb_data/types.d.ts" />
+
+/**
+ * 回滚迁移
+ */
+down((app) => {
+  const dao = new Dao(app);
+  dao.deleteCollection("posts");
+});
+```
+
+### 3. 数据迁移脚本
+
+```javascript
+// pb_migrations/1705123459_migrate_author_data.js
+
+/// <reference path="../pb_data/types.d.ts" />
+
+/**
+ * 迁移作者数据
+ * 将旧数据中的 authorName 字段迁移到 author 关系
+ */
+migration((app) => {
+  const dao = new Dao(app);
+  const posts = dao.findCollectionByNameOrId("posts");
+
+  // 获取所有文章
+  const records = dao.findRecordsByExpr(posts, "id != ''");
+
+  // 为每条记录处理作者信息
+  for (const record of records) {
+    const authorName = record.getString("authorName");
+
+    if (authorName) {
+      // 查找或创建用户
+      let users = dao.findRecordsByFilter(
+        "_pb_users_auth_",
+        `name = "${authorName}"`,
+      );
+
+      let user;
+      if (users.length > 0) {
+        user = users[0];
+      } else {
+        // 创建新用户
+        user = new Record(dao.findCollectionByNameOrId("users"));
+        user.set("name", authorName);
+        dao.saveRecord(user);
+      }
+
+      // 更新文章的作者关系
+      record.set("author", user.id);
+      dao.saveRecord(record);
+    }
+  }
+});
+```
+
+### 4. 迁移最佳实践
+
+```javascript
+// 1. 备份数据
+// 在执行迁移前，始终备份 pb_data 目录
+
+// 2. 测试迁移
+// 在开发环境充分测试迁移脚本
+
+// 3. 使用事务（如果可能）
+// 确保迁移的原子性
+
+// 4. 分批处理大量数据
+migration((app) => {
+  const BATCH_SIZE = 100;
+  let offset = 0;
+
+  while (true) {
+    const records = dao.findRecordsByExpr(
+      collection,
+      `id != ''`,
+      undefined,
+      BATCH_SIZE,
+      offset,
+    );
+
+    if (records.length === 0) break;
+
+    // 处理这批数据
+    for (const record of records) {
+      // 处理逻辑
+    }
+
+    offset += BATCH_SIZE;
+  }
+});
+```
+
+## 性能优化
+
+### 1. 查询优化
+
+```javascript
+// 不好的做法：获取过多数据
+const allRecords = await pb.collection("posts").getFullList();
+
+// 好的做法：分页查询
+const page1 = await pb.collection("posts").getList(1, 20);
+const page2 = await pb.collection("posts").getList(2, 20);
+
+// 不好的做法：过度使用 expand
+const records = await pb.collection("posts").getList(1, 20, {
+  expand: "author,comments,comments.author,tags",
+});
+
+// 好的做法：按需 expand
+const records = await pb.collection("posts").getList(1, 20, {
+  expand: "author",
+});
+```
+
+### 2. 缓存策略
+
+```javascript
+// 客户端缓存
+import PocketBase from "pocketbase";
+
+const pb = new PocketBase("https://api.example.com");
+
+// 启用自动缓存
+pb.autoCancellation(false);
+
+// 自定义缓存
+const cache = new Map();
+
+async function getPosts(cacheKey = "posts") {
+  // 检查缓存
+  if (cache.has(cacheKey)) {
+    const cached = cache.get(cacheKey);
+    if (Date.now() - cached.timestamp < 60000) {
+      return cached.data;
+    }
+  }
+
+  // 获取新数据
+  const data = await pb.collection("posts").getList(1, 20);
+
+  // 更新缓存
+  cache.set(cacheKey, {
+    data,
+    timestamp: Date.now(),
+  });
+
+  return data;
+}
+```
+
+### 3. 批量操作
+
+```javascript
+// 批量创建
+async function batchCreate(items) {
+  const results = [];
+
+  for (const item of items) {
+    try {
+      const result = await pb.collection("posts").create(item);
+      results.push(result);
+    } catch (error) {
+      console.error("创建失败:", error);
+    }
+  }
+
+  return results;
+}
+
+// 批量更新
+async function batchUpdate(items) {
+  const results = [];
+
+  for (const item of items) {
+    try {
+      const result = await pb.collection("posts").update(item.id, item);
+      results.push(result);
+    } catch (error) {
+      console.error("更新失败:", error);
+    }
+  }
+
+  return results;
+}
+```
+
+### 4. 连接池和并发
+
+```javascript
+// PocketBase 使用连接池管理数据库连接
+// 无需手动管理
+
+// 并发请求优化
+async function fetchParallel() {
+  const [posts, authors, tags] = await Promise.all([
+    pb.collection("posts").getList(1, 20),
+    pb.collection("authors").getFullList(),
+    pb.collection("tags").getFullList(),
+  ]);
+
+  return { posts, authors, tags };
+}
+```
+
+## 生产环境建议
+
+### 1. 备份策略
+
+```bash
+#!/bin/bash
+# backup.sh
+
+BACKUP_DIR="/opt/backups/pocketbase"
+DATE=$(date +%Y%m%d_%H%M%S)
+
+# 创建备份目录
+mkdir -p "$BACKUP_DIR"
+
+# 停止服务（可选）
+docker-compose stop pocketbase
+
+# 备份数据库
+cp /opt/pocketbase/pb_data/data.db "$BACKUP_DIR/data_$DATE.db"
+
+# 压缩备份
+tar -czf "$BACKUP_DIR/backup_$DATE.tar.gz" \
+  /opt/pocketbase/pb_data \
+  /opt/pocketbase/pb_public
+
+# 启动服务
+docker-compose start pocketbase
+
+# 上传到云存储（可选）
+# aws s3 cp "$BACKUP_DIR/backup_$DATE.tar.gz" s3://backups/
+
+# 删除 30 天前的备份
+find "$BACKUP_DIR" -name "backup_*.tar.gz" -mtime +30 -delete
+
+echo "Backup completed: backup_$DATE.tar.gz"
+```
+
+### 2. 监控指标
+
+```javascript
+// 监控指标
+const metrics = {
+  // 数据库大小
+  databaseSize: async () => {
+    const stats = await pb.collection("_").getFirstListItem("");
+    return stats;
+  },
+
+  // 查询性能
+  queryTime: async () => {
+    const start = Date.now();
+    await pb.collection("posts").getList(1, 20);
+    return Date.now() - start;
+  },
+
+  // 并发连接数
+  activeConnections: () => {
+    // 通过监控工具获取
+  },
+};
+```
+
+### 3. 安全配置
+
+```javascript
+// 1. 启用数据加密
+// 在生产环境设置加密密钥
+POCKETBASE_ENCRYPTION_KEY = your - 32 - character - key;
+
+// 2. 限制 API 访问
+// 通过反向代理限制访问
+
+// 3. 定期更新
+// 保持 PocketBase 版本最新
+
+// 4. 审计日志
+// 记录敏感操作
+```
+
+## 参考资源
+
+- [PocketBase 官方文档](/docs)
+- [Docker 部署指南](/blog/pocketbase-docker-deployment)
+- [生产部署清单](/blog/production-deployment-checklist)
+- [SQLite 优化指南](https://www.sqlite.org/optoverview.html)

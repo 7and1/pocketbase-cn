@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 const COOKIE_CONSENT_KEY = "pb-cookie-consent";
 
-type ConsentValue = "all" | "essential" | null;
+export type ConsentValue = "all" | "essential" | null;
 
 export default function CookieConsent() {
   const [consent, setConsent] = useState<ConsentValue>(null);

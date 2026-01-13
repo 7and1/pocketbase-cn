@@ -1,0 +1,633 @@
+---
+title: 安全配置清单
+description: PocketBase 应用部署前的安全检查清单和最佳实践
+updatedDate: 2025-01-12
+difficulty: advanced
+---
+
+安全是生产环境最重要的考量因素之一。本文提供 PocketBase 应用部署前必须检查的安全配置清单。
+
+## 部署前检查清单
+
+### 服务器配置
+
+#### SSL/HTTPS 配置
+
+```nginx
+# nginx 配置示例
+server {
+    listen 443 ssl http2;
+    server_name api.example.com;
+
+    # 使用强加密套件
+    ssl_certificate /etc/ssl/certs/api.example.com.crt;
+    ssl_certificate_key /etc/ssl/private/api.example.com.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256;
+    ssl_prefer_server_ciphers off;
+
+    # HSTS
+    add_header Strict-Transport-Security "max-age=63072000" always;
+
+    location / {
+        proxy_pass http://localhost:8090;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# HTTP 重定向到 HTTPS
+server {
+    listen 80;
+    server_name api.example.com;
+    return 301 https://$server_name$request_uri;
+}
+```
+
+#### 防火墙配置
+
+```bash
+# 只开放必要的端口
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22/tcp    # SSH
+ufw allow 80/tcp    # HTTP
+ufw allow 443/tcp   # HTTPS
+ufw enable
+```
+
+#### 禁用公开访问
+
+确保管理后台不对外公开：
+
+```bash
+# 使用反向代理屏蔽管理后台
+location /_/ {
+    # 只允许内网访问
+    allow 192.168.1.0/24;
+    deny all;
+
+    proxy_pass http://localhost:8090;
+}
+```
+
+### API 规则安全
+
+#### 管理员集合规则
+
+```javascript
+// pb_migrations/1736069523_create_admins_collection.js
+migrate((app) => {
+  const collection = new Collection({
+    id: "admins_collection",
+    name: "admins",
+    type: "auth", // 认证集合
+    fields: [
+      {
+        name: "role",
+        type: "select",
+        options: {
+          values: ["admin", "superadmin"],
+        },
+      },
+    ],
+  });
+
+  // API 规则
+  collection.rules = [
+    {
+      // 创建：不允许通过 API 创建
+      rule: "",
+      create: false,
+    },
+    {
+      // 查看：只能查看自己的记录
+      rule: "id = @request.auth.id",
+      viewRule: "id = @request.auth.id",
+    },
+    {
+      // 更新：只能更新自己的记录
+      rule: "id = @request.auth.id",
+      updateRule: "id = @request.auth.id",
+    },
+    {
+      // 删除：不允许删除
+      rule: "",
+      delete: false,
+    },
+  ];
+});
+```
+
+#### 通用集合规则模板
+
+```javascript
+// 公开读取（如文章列表）
+{
+  rule: "status = 'published'",
+  viewRule: "status = 'published'",
+  create: false,      // 不允许创建
+  update: false,     // 不允许更新
+  delete: false,     // 不允许删除
+}
+
+// 认证用户可读
+{
+  rule: "id = @request.auth.id",
+  viewRule: "id = @request.auth.id",
+  create: false,
+  update: false,
+  delete: false,
+}
+
+// 作者可编辑自己的内容
+{
+  rule: "author = @request.auth.id",
+  viewRule: "author = @request.auth.id",
+  create: "@request.auth.id != ''",  // 登录用户可创建
+  update: "author = @request.auth.id",
+  delete: "author = @request.auth.id",
+}
+
+// 管理员完全控制
+{
+  rule: "@request.auth.collection.name = 'admins' && @request.auth.role = 'admin'",
+  viewRule: "@request.auth.collection.name = 'admins'",
+  create: "@request.auth.collection.name = 'admins'",
+  update: "@request.auth.collection.name = 'admins'",
+  delete: "@request.auth.collection.name = 'admins'",
+}
+```
+
+### 敏感操作保护
+
+#### 速率限制
+
+在 `pb_hooks/main.go` 中实现：
+
+```go
+package main
+
+import (
+  "fmt"
+  "github.com/pocketbase/pocketbase"
+  "github.com/pocketbase/pocketbase/core"
+  "github.com/pocketbase/pocketbase/plugins/ghook"
+  "golang.org/x/time/rate"
+)
+
+// 简单的内存速率限制器
+var limiters = make(map[string]*rate.Limiter)
+var limiterMutex = sync.Mutex{}
+
+func getLimiter(ip string) *rate.Limiter {
+  limiterMutex.Lock()
+  defer limiterMutex.Unlock()
+
+  if limiter, exists := limiters[ip]; exists {
+    return limiter
+  }
+
+  limiter := rate.NewLimiter(1, 10)  // 每秒 1 次，突发 10 次
+  limiters[ip] = limiter
+  return limiter
+}
+
+func rateLimitMiddleware(e *core.RequestEvent) error {
+  // 排除静态文件
+  if e.Request.URL.Path == "/api/files" {
+    return e.Next()
+  }
+
+  ip := e.RealIP()
+  limiter := getLimiter(ip)
+
+  if !limiter.Allow() {
+    return e.JSON(429, map[string]string{
+      "error": "Too many requests",
+    })
+  }
+
+  return e.Next()
+}
+
+func main() {
+  app := pocketbase.New()
+
+  // 注册速率限制中间件
+  app.OnBeforeServe().Add(func(e *core.ServeEvent) error {
+    e.Router.Use(rateLimitMiddleware)
+    return nil
+  })
+
+  app.Serve()
+}
+```
+
+#### 操作日志记录
+
+```javascript
+// pb_hooks/logs.cjs
+const fs = require("fs");
+const path = require("path");
+
+const logFile = path.join(__dirname, "../logs/security.log");
+
+function logAction(action, collection, recordId, userId) {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    action,
+    collection,
+    recordId,
+    userId,
+    ip: null,
+  };
+
+  fs.appendFileSync(logFile, JSON.stringify(entry) + "\n");
+}
+
+// 监听记录变更
+onRecordAfterCreateRequest((e) => {
+  logAction("create", e.collection.name, e.record.id, e.authState?.id);
+});
+
+onRecordAfterUpdateRequest((e) => {
+  logAction("update", e.collection.name, e.record.id, e.authState?.id);
+});
+
+onRecordAfterDeleteRequest((e) => {
+  logAction("delete", e.collection.name, e.record.id, e.authState?.id);
+});
+
+// 监听认证失败
+onRecordAuthRequest((e) => {
+  if (e.httpContext.status >= 400) {
+    logAction("auth_failed", e.collection.name, null, null);
+  }
+});
+```
+
+### 数据验证
+
+#### 输入验证
+
+```javascript
+// pb_hooks/validate.cjs
+const validator = require("validator");
+
+// 邮箱验证
+onRecordBeforeCreateRequest((e) => {
+  if (e.collection.name === "users") {
+    const email = e.record.data.email;
+
+    if (!validator.isEmail(email)) {
+      throw new BadRequestError("Invalid email format");
+    }
+
+    // 检查邮箱域名
+    const domain = email.split("@")[1];
+    const blockedDomains = ["tempmail.com", "throwaway.io"];
+
+    if (blockedDomains.includes(domain)) {
+      throw new BadRequestError("Email domain not allowed");
+    }
+  }
+});
+
+// 密码强度验证
+onRecordBeforeCreateRequest((e) => {
+  if (e.collection.name === "users" && e.record.data.password) {
+    const password = e.record.data.password;
+
+    if (password.length < 8) {
+      throw new BadRequestError("Password must be at least 8 characters");
+    }
+
+    if (!/\d/.test(password)) {
+      throw new BadRequestError("Password must contain at least one number");
+    }
+
+    if (!/[a-zA-Z]/.test(password)) {
+      throw new BadRequestError("Password must contain at least one letter");
+    }
+  }
+});
+
+// XSS 防护
+onRecordBeforeCreateRequest((e) => {
+  const sanitize = (value) => {
+    if (typeof value === "string") {
+      return value
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#x27;")
+        .replace(/\//g, "&#x2F;");
+    }
+    if (Array.isArray(value)) {
+      return value.map(sanitize);
+    }
+    if (typeof value === "object" && value !== null) {
+      return Object.fromEntries(
+        Object.entries(value).map(([k, v]) => [k, sanitize(v)]),
+      );
+    }
+    return value;
+  };
+
+  e.record.data = sanitize(e.record.data);
+});
+```
+
+### 文件上传安全
+
+#### 文件类型限制
+
+```javascript
+// pb_hooks/files.cjs
+const allowedMimeTypes = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "application/pdf",
+];
+
+const maxFileSize = 5 * 1024 * 1024; // 5MB
+
+onRecordBeforeCreateRequest((e) => {
+  const files = e.httpContext.form?.files;
+
+  if (!files) return;
+
+  for (const [field, file] of Object.entries(files)) {
+    // 检查文件大小
+    if (file.size > maxFileSize) {
+      throw new BadRequestError(`File ${field} exceeds maximum size`);
+    }
+
+    // 检查 MIME 类型
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      throw new BadRequestError(`File type ${file.mimetype} not allowed`);
+    }
+
+    // 检查文件扩展名
+    const ext = path.extname(file.name).toLowerCase();
+    const allowedExts = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf"];
+
+    if (!allowedExts.includes(ext)) {
+      throw new BadRequestError(`File extension ${ext} not allowed`);
+    }
+  }
+});
+```
+
+#### 文件名安全化
+
+```javascript
+function sanitizeFilename(filename) {
+  // 移除路径分隔符
+  filename = filename.replace(/[/\\]/g, "");
+
+  // 只保留安全字符
+  filename = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+
+  // 限制长度
+  const ext = path.extname(filename);
+  const name = path.basename(filename, ext).substring(0, 100);
+
+  return name + ext;
+}
+```
+
+### 环境变量安全
+
+#### 敏感配置
+
+```bash
+# .env (不要提交到版本控制)
+POCKETBASE_URL=https://api.example.com
+
+# 加密密钥（生成随机字符串）
+ENCRYPTION_KEY=your-random-64-char-key-here
+
+# JWT 密钥
+JWT_SECRET=your-jwt-secret-here
+
+# SMTP 配置
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=noreply@example.com
+SMTP_PASS=your-smtp-password
+
+# OAuth 凭证
+OAUTH_GOOGLE_CLIENT_ID=xxx
+OAUTH_GOOGLE_CLIENT_SECRET=xxx
+OAUTH_GITHUB_CLIENT_ID=xxx
+OAUTH_GITHUB_CLIENT_SECRET=xxx
+
+# 数据库备份
+BACKUP_S3_BUCKET=your-backup-bucket
+BACKUP_S3_ACCESS_KEY=xxx
+BACKUP_S3_SECRET_KEY=xxx
+```
+
+#### 生成安全密钥
+
+```bash
+# 生成随机密钥
+openssl rand -base64 64
+
+# 或使用
+node -e "console.log(require('crypto').randomBytes(64).toString('base64'))"
+```
+
+### CORS 配置
+
+#### 严格的 CORS 设置
+
+```javascript
+// pb_hooks/cors.cjs
+const allowedOrigins = ["https://example.com", "https://www.example.com"];
+
+onBeforeServe((e) => {
+  e.router.use((c, next) => {
+    const origin = c.request().header.get("origin");
+
+    // 检查来源
+    if (allowedOrigins.includes(origin)) {
+      c.response().headers.set("Access-Control-Allow-Origin", origin);
+    }
+
+    // 允许的方法
+    c.response().headers.set(
+      "Access-Control-Allow-Methods",
+      "GET, POST, PUT, DELETE, OPTIONS",
+    );
+
+    // 允许的请求头
+    c.response().headers.set(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization",
+    );
+
+    // 允许携带凭证
+    c.response().headers.set("Access-Control-Allow-Credentials", "true");
+
+    // 预检请求缓存时间
+    c.response().headers.set("Access-Control-Max-Age", "86400");
+
+    return next();
+  });
+});
+```
+
+## 安全检查清单
+
+### 部署前检查
+
+- [ ] HTTPS 已启用，HTTP 重定向到 HTTPS
+- [ ] 管理后台 `_/` 路径已限制访问
+- [ ] 防火墙已正确配置
+- [ ] SSL 证书有效且未过期
+- [ ] API 规则已为所有集合配置
+- [ ] 敏感环境变量已配置
+- [ ] .env 文件不在版本控制中
+
+### API 规则检查
+
+- [ ] 未认证用户不能访问敏感数据
+- [ ] 用户只能操作自己的数据
+- [ ] 管理员操作已正确限制
+- [ ] 文件上传有类型和大小限制
+- [ ] 批量操作有权限检查
+
+### 代码安全检查
+
+- [ ] 输入已验证和清理
+- [ ] SQL 注入防护（使用参数化查询）
+- [ ] XSS 防护已实施
+- [ ] 敏感数据不记录到日志
+- [ ] 错误消息不泄露敏感信息
+
+### 运维安全检查
+
+- [ ] 定期备份已配置
+- [ ] 备份加密已启用
+- [ ] 访问日志已启用
+- [ ] 速率限制已配置
+- [ ] 安全更新计划已制定
+
+## 常见安全问题
+
+### API 规则绕过
+
+```javascript
+// 不安全：使用 OR 条件可能导致绕过
+// rule: "author = @request.auth.id || status = 'published'"
+// 问题：可能绕过权限检查
+
+// 安全：分别处理不同情况
+// 公开内容：rule = "status = 'published'"
+// 私有内容：rule = "author = @request.auth.id"
+```
+
+### 权限提升
+
+```javascript
+// 不安全：允许用户修改自己的 role
+{
+  rule: "id = @request.auth.id",
+  update: "id = @request.auth.id",
+  fields: ["name", "email", "role"],  // role 不应可修改
+}
+
+// 安全：指定可修改字段
+{
+  rule: "id = @request.auth.id",
+  update: "id = @request.auth.id",
+  fields: ["name", "email"],  // 只允许修改这些字段
+}
+```
+
+### 信息泄露
+
+```javascript
+// 不安全：返回详细错误
+catch (error) {
+  return e.json(500, {
+    error: error.message,      // 可能泄露内部信息
+    stack: error.stack,        // 绝对不应返回
+  });
+}
+
+// 安全：返回通用错误
+catch (error) {
+  console.error(error);        // 记录详细错误到日志
+
+  return e.json(500, {
+    error: 'An error occurred',
+    code: 'INTERNAL_ERROR',
+  });
+}
+```
+
+## 安全工具推荐
+
+### 静态代码分析
+
+```bash
+# 使用 ESLint 检查安全问题
+npm install -D eslint eslint-plugin-security
+
+# 使用 Snyk 检查依赖漏洞
+npm install -g snyk
+snyk test
+```
+
+### 自动化安全测试
+
+```javascript
+// tests/security.test.js
+describe("Security Tests", () => {
+  test("should not allow unauthenticated access", async () => {
+    const response = await fetch("/api/collections/admins/records", {
+      headers: {
+        // 不提供 Authorization
+      },
+    });
+
+    expect(response.status).toBe(401);
+  });
+
+  test("should not allow accessing other users data", async () => {
+    const user1 = await loginAsUser1();
+    const user2Record = await getRecordCreatedByUser2();
+
+    const response = await fetch(
+      `/api/collections/posts/records/${user2Record.id}`,
+      {
+        headers: {
+          Authorization: `Bearer ${user1.token}`,
+        },
+      },
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  test("should reject invalid file types", async () => {
+    const response = await uploadFile("malicious.exe");
+
+    expect(response.status).toBe(400);
+  });
+});
+```
+
+## 安全资源
+
+- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
+- [PocketBase Security Best Practices](https://pocketbase.io/docs/go-overview/#security)
+- [Web Security Guidelines](https://github.com/OWASP/CheatSheetSeries)

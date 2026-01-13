@@ -1,0 +1,1111 @@
+---
+title: Taro 集成
+description: 在 Taro 项目中集成 PocketBase JS SDK，支持微信小程序、H5、React Native 统一开发
+updatedDate: 2025-01-12
+difficulty: intermediate
+---
+
+Taro 是京东开源的多端统一开发解决方案，可以使用 React/Vue 语法编写小程序、H5、React Native 等应用。本文介绍如何在 Taro 中集成 PocketBase。
+
+## 安装
+
+### 安装依赖
+
+```bash
+# 使用 npm
+npm install pocketbase
+
+# 使用 yarn
+yarn add pocketbase
+
+# 使用 pnpm
+pnpm add pocketbase
+```
+
+## 基础配置
+
+### 创建 PocketBase 实例
+
+创建 `src/utils/pocketbase.ts`：
+
+```typescript
+import PocketBase from "pocketbase";
+
+// 根据环境选择 URL
+const getBaseUrl = () => {
+  // 开发环境
+  if (process.env.NODE_ENV === "development") {
+    // 微信小程序使用内网穿透或本地 IP
+    // H5 可以直接使用 localhost
+    // RN 使用模拟器可访问的地址
+    return "http://192.168.1.100:8090";
+  }
+
+  // 生产环境
+  return process.env.POCKETBASE_URL || "https://api.yourapp.com";
+};
+
+export const pb = new PocketBase(getBaseUrl());
+
+// 自定义存储适配器（适配多端）
+class TaroStorage {
+  get(key: string): string | null {
+    try {
+      // @ts-ignore
+      const { Taro } = require("@tarojs/taro");
+      const data = Taro.getStorageSync(key);
+      return data ? JSON.stringify(data) : null;
+    } catch {
+      return localStorage.getItem(key);
+    }
+  }
+
+  set(key: string, value: string): void {
+    try {
+      // @ts-ignore
+      const { Taro } = require("@tarojs/taro");
+      Taro.setStorageSync(key, JSON.parse(value));
+    } catch {
+      localStorage.setItem(key, value);
+    }
+  }
+
+  remove(key: string): void {
+    try {
+      // @ts-ignore
+      const { Taro } = require("@tarojs/taro");
+      Taro.removeStorageSync(key);
+    } catch {
+      localStorage.removeItem(key);
+    }
+  }
+}
+
+// 替换默认存储
+// pb.authStore.storage = new TaroStorage();
+
+// 恢复登录状态
+try {
+  const stored = pb.authStore.storage.get("pb_auth");
+  if (stored) {
+    const auth = JSON.parse(stored);
+    pb.authStore.save(auth.token, auth.model);
+  }
+} catch (e) {
+  console.log("No stored auth found");
+}
+
+// 监听登录状态变化
+pb.authStore.onChange((token, model) => {
+  pb.authStore.storage.set("pb_auth", JSON.stringify({ token, model }));
+});
+
+export default pb;
+```
+
+### 环境变量配置
+
+创建 `.env` 文件：
+
+```ini
+# 开发环境
+POCKETBASE_URL=http://192.168.1.100:8090
+
+# 生产环境
+POCKETBASE_URL=https://api.yourapp.com
+```
+
+在 `config/index.ts` 中配置：
+
+```typescript
+import defineConfig from "./config";
+
+export default defineConfig({
+  env: {
+    POCKETBASE_URL: process.env.POCKETBASE_URL,
+  },
+});
+```
+
+## 用户认证
+
+### 认证 Hook
+
+创建 `src/hooks/useAuth.ts`：
+
+```typescript
+import { useState, useCallback } from "react";
+import { pb } from "@/utils/pocketbase";
+import type { RecordModel } from "pocketbase";
+
+export interface User extends RecordModel {
+  id: string;
+  email: string;
+  name: string;
+  avatar?: string;
+  role?: string;
+}
+
+export function useAuth() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // 认证状态
+  const isAuthenticated = pb.authStore.isValid;
+  const user = pb.authStore.model as User | null;
+
+  // 登录
+  const login = useCallback(async (email: string, password: string) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const authData = await pb
+        .collection("users")
+        .authWithPassword(email, password);
+      return authData;
+    } catch (err: any) {
+      setError(err.message || "登录失败");
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // 注册
+  const register = useCallback(
+    async (data: {
+      email: string;
+      password: string;
+      passwordConfirm: string;
+      name?: string;
+    }) => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const record = await pb.collection("users").create(data);
+        return record;
+      } catch (err: any) {
+        setError(err.message || "注册失败");
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
+
+  // 微信小程序登录
+  const wechatLogin = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      // @ts-ignore
+      const { Taro } = require("@tarojs/taro");
+
+      // 获取微信 code
+      const { code } = await Taro.login();
+
+      // 发送到后端换取 session
+      const result = await pb.send("/api/wechat-login", {
+        method: "POST",
+        body: JSON.stringify({ code }),
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (result.token) {
+        pb.authStore.save(result.token, result.user);
+      }
+
+      return result;
+    } catch (err: any) {
+      setError(err.message || "微信登录失败");
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // 手机号登录
+  const phoneLogin = useCallback(async (phone: string, code: string) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const result = await pb.send("/api/phone-login", {
+        method: "POST",
+        body: JSON.stringify({ phone, code }),
+      });
+
+      if (result.token) {
+        pb.authStore.save(result.token, result.user);
+      }
+
+      return result;
+    } catch (err: any) {
+      setError(err.message || "登录失败");
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // 登出
+  const logout = useCallback(() => {
+    pb.authStore.clear();
+    // @ts-ignore
+    const { Taro } = require("@tarojs/taro");
+    Taro.reLaunch({ url: "/pages/login/index" });
+  }, []);
+
+  // 刷新 Token
+  const refresh = useCallback(async () => {
+    try {
+      await pb.collection("users").authRefresh();
+    } catch (err) {
+      logout();
+      throw err;
+    }
+  }, [logout]);
+
+  return {
+    user,
+    isAuthenticated,
+    loading,
+    error,
+    login,
+    register,
+    wechatLogin,
+    phoneLogin,
+    logout,
+    refresh,
+  };
+}
+```
+
+### 登录页面示例
+
+创建 `src/pages/login/index.tsx`：
+
+```tsx
+import { useState } from "react";
+import { View, Input, Button, Text } from "@tarojs/components";
+import Taro from "@tarojs/taro";
+import { useAuth } from "@/hooks/useAuth";
+
+import "./index.scss";
+
+export default function LoginPage() {
+  const [form, setForm] = useState({
+    email: "",
+    password: "",
+  });
+
+  const { loading, login, wechatLogin, error } = useAuth();
+
+  const handleLogin = async () => {
+    if (!form.email || !form.password) {
+      Taro.showToast({ title: "请填写完整信息", icon: "none" });
+      return;
+    }
+
+    try {
+      await login(form.email, form.password);
+      Taro.showToast({ title: "登录成功", icon: "success" });
+      Taro.switchTab({ url: "/pages/home/index" });
+    } catch (err) {
+      Taro.showToast({ title: error || "登录失败", icon: "none" });
+    }
+  };
+
+  const handleWechatLogin = async () => {
+    try {
+      await wechatLogin();
+      Taro.showToast({ title: "登录成功", icon: "success" });
+      Taro.switchTab({ url: "/pages/home/index" });
+    } catch (err) {
+      Taro.showToast({ title: "微信登录失败", icon: "none" });
+    }
+  };
+
+  return (
+    <View className="login-page">
+      <View className="login-container">
+        <View className="logo">
+          <Text className="logo-text">PocketBase</Text>
+        </View>
+
+        <View className="form">
+          <View className="form-item">
+            <Input
+              type="text"
+              placeholder="请输入邮箱"
+              value={form.email}
+              onInput={(e) => setForm({ ...form, email: e.detail.value })}
+            />
+          </View>
+
+          <View className="form-item">
+            <Input
+              type="password"
+              placeholder="请输入密码"
+              value={form.password}
+              onInput={(e) => setForm({ ...form, password: e.detail.value })}
+            />
+          </View>
+
+          <Button
+            className="login-btn"
+            disabled={loading}
+            onClick={handleLogin}
+          >
+            {loading ? "登录中..." : "登录"}
+          </Button>
+
+          {/* 微信小程序登录 */}
+          {process.env.TARO_ENV === "weapp" && (
+            <Button className="wechat-btn" onClick={handleWechatLogin}>
+              微信一键登录
+            </Button>
+          )}
+
+          <View className="links">
+            <Text
+              className="link"
+              onClick={() => Taro.navigateTo({ url: "/pages/register/index" })}
+            >
+              还没有账号？去注册
+            </Text>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+}
+```
+
+## 数据操作
+
+### 通用数据 Hook
+
+创建 `src/hooks/useCollection.ts`：
+
+```typescript
+import { useState, useCallback, useEffect } from "react";
+import { pb } from "@/utils/pocketbase";
+import type { RecordModel, ListResult } from "pocketbase";
+
+export function useCollection<T extends RecordModel = RecordModel>(
+  collectionName: string,
+  options: {
+    expand?: string;
+    autoFetch?: boolean;
+    filter?: string;
+    sort?: string;
+  } = {},
+) {
+  const [items, setItems] = useState<T[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [totalItems, setTotalItems] = useState(0);
+
+  // 获取列表
+  const getList = useCallback(
+    async (
+      page = 1,
+      perPage = 20,
+      filter = options.filter || "",
+      sort = options.sort || "-created",
+    ) => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const result = await pb
+          .collection(collectionName)
+          .getList<T>(page, perPage, {
+            filter,
+            sort,
+            expand: options.expand || "",
+          });
+
+        setItems(result.items);
+        setTotalItems(result.totalItems);
+        return result;
+      } catch (err: any) {
+        setError(err.message || "获取数据失败");
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [collectionName, options.expand, options.filter, options.sort],
+  );
+
+  // 获取单条
+  const getOne = useCallback(
+    async (id: string) => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const record = await pb.collection(collectionName).getOne<T>(id, {
+          expand: options.expand || "",
+        });
+        return record;
+      } catch (err: any) {
+        setError(err.message || "获取数据失败");
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [collectionName, options.expand],
+  );
+
+  // 创建
+  const create = useCallback(
+    async (data: any) => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const record = await pb.collection(collectionName).create<T>(data);
+        setItems((prev) => [record, ...prev]);
+        return record;
+      } catch (err: any) {
+        setError(err.message || "创建失败");
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [collectionName],
+  );
+
+  // 更新
+  const update = useCallback(
+    async (id: string, data: any) => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const record = await pb.collection(collectionName).update<T>(id, data);
+        setItems((prev) =>
+          prev.map((item) => (item.id === id ? record : item)),
+        );
+        return record;
+      } catch (err: any) {
+        setError(err.message || "更新失败");
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [collectionName],
+  );
+
+  // 删除
+  const remove = useCallback(
+    async (id: string) => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        await pb.collection(collectionName).delete(id);
+        setItems((prev) => prev.filter((item) => item.id !== id));
+      } catch (err: any) {
+        setError(err.message || "删除失败");
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [collectionName],
+  );
+
+  // 初始加载
+  useEffect(() => {
+    if (options.autoFetch !== false) {
+      getList();
+    }
+  }, [getList, options.autoFetch]);
+
+  return {
+    items,
+    loading,
+    error,
+    totalItems,
+    getList,
+    getOne,
+    create,
+    update,
+    remove,
+  };
+}
+```
+
+## 实时订阅
+
+### 实时订阅 Hook
+
+创建 `src/hooks/useRealtime.ts`：
+
+```typescript
+import { useEffect, useRef, useCallback } from "react";
+import { pb } from "@/utils/pocketbase";
+
+type RealtimeEvent = {
+  action: "create" | "update" | "delete";
+  record: any;
+};
+
+type RealtimeCallback = (event: RealtimeEvent) => void;
+
+export function useRealtime(
+  collection: string,
+  callback: RealtimeCallback,
+  filter?: string,
+) {
+  const subscriptionRef = useRef<any>(null);
+  const callbackRef = useRef(callback);
+
+  // 保持 callback 引用最新
+  callbackRef.current = callback;
+
+  const subscribe = useCallback(() => {
+    // 微信小程序不支持 WebSocket，使用轮询
+    if (process.env.TARO_ENV === "weapp") {
+      console.log("小程序环境，使用轮询模拟实时");
+      return;
+    }
+
+    try {
+      subscriptionRef.current = pb
+        .collection(collection)
+        .subscribe("*", (e) => {
+          // 客户端过滤
+          if (filter) {
+            // 简单的过滤逻辑
+            if (!matchesFilter(e.record, filter)) {
+              return;
+            }
+          }
+          callbackRef.current(e);
+        });
+    } catch (err) {
+      console.error("订阅失败:", err);
+    }
+  }, [collection, filter]);
+
+  const unsubscribe = useCallback(() => {
+    if (subscriptionRef.current) {
+      subscriptionRef.current.unsubscribe();
+      subscriptionRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    subscribe();
+    return () => unsubscribe();
+  }, [subscribe, unsubscribe]);
+
+  return { subscribe, unsubscribe };
+}
+
+// 简单的过滤匹配
+function matchesFilter(record: any, filter: string): boolean {
+  // 这里可以实现更复杂的过滤逻辑
+  // 例如解析 filter 表达式
+  return true;
+}
+
+// 轮询 Hook（用于小程序）
+export function usePolling(
+  collection: string,
+  callback: () => void,
+  interval = 5000,
+) {
+  const timerRef = useRef<NodeJS.Timeout>();
+
+  useEffect(() => {
+    if (process.env.TARO_ENV !== "weapp") return;
+
+    timerRef.current = setInterval(() => {
+      callback();
+    }, interval);
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, [collection, callback, interval]);
+}
+```
+
+### 使用示例
+
+```tsx
+import { useCollection } from "@/hooks/useCollection";
+import { useRealtime } from "@/hooks/useRealtime";
+import { pb } from "@/utils/pocketbase";
+
+export default function PostsPage() {
+  const { items, loading, getList } = useCollection("posts", {
+    expand: "author",
+    filter: 'status = "published"',
+    sort: "-created",
+  });
+
+  // H5 环境使用实时订阅
+  useRealtime("posts", (event) => {
+    console.log("实时事件:", event);
+    // 刷新列表
+    getList();
+  });
+
+  return (
+    <View>
+      {loading ? (
+        <View>加载中...</View>
+      ) : (
+        items.map((post) => (
+          <View key={post.id}>
+            <Text>{post.title}</Text>
+          </View>
+        ))
+      )}
+    </View>
+  );
+}
+```
+
+## 文件上传
+
+### 文件上传 Hook
+
+创建 `src/hooks/useUpload.ts`：
+
+```typescript
+import { useState, useCallback } from "react";
+import Taro from "@tarojs/taro";
+import { pb } from "@/utils/pocketbase";
+
+export function useUpload() {
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  const uploadFile = useCallback(
+    async (
+      collection: string,
+      recordId: string,
+      field: string,
+      filePath: string,
+    ) => {
+      setUploading(true);
+      setProgress(0);
+
+      return new Promise((resolve, reject) => {
+        const uploadTask = Taro.uploadFile({
+          url: `${pb.baseUrl}/api/collections/${collection}/records/${recordId}`,
+          filePath,
+          name: field,
+          header: {
+            Authorization: `Bearer ${pb.authStore.token}`,
+          },
+          success: (res) => {
+            if (res.statusCode === 200) {
+              const data = JSON.parse(res.data);
+              resolve(data);
+            } else {
+              reject(new Error("上传失败"));
+            }
+          },
+          fail: reject,
+        });
+
+        uploadTask.onProgressUpdate((res) => {
+          setProgress(res.progress);
+        });
+      }).finally(() => {
+        setUploading(false);
+        setProgress(0);
+      });
+    },
+    [],
+  );
+
+  const chooseAndUpload = useCallback(
+    async (collection: string, recordId: string, field: string, count = 1) => {
+      try {
+        const res = await Taro.chooseImage({
+          count,
+          sizeType: ["compressed"],
+          sourceType: ["album", "camera"],
+        });
+
+        const results = [];
+        for (const filePath of res.tempFilePaths) {
+          const result = await uploadFile(
+            collection,
+            recordId,
+            field,
+            filePath,
+          );
+          results.push(result);
+        }
+
+        return results;
+      } catch (err) {
+        throw err;
+      }
+    },
+    [uploadFile],
+  );
+
+  const getFileUrl = useCallback(
+    (record: any, filename: string, thumbSize?: string) => {
+      return pb.files.getUrl(
+        record,
+        filename,
+        thumbSize ? { thumb: thumbSize } : undefined,
+      );
+    },
+    [],
+  );
+
+  return {
+    uploading,
+    progress,
+    uploadFile,
+    chooseAndUpload,
+    getFileUrl,
+  };
+}
+```
+
+### 图片上传组件
+
+创建 `src/components/ImageUpload/index.tsx`：
+
+```tsx
+import { useState } from "react";
+import { View, Image, Button, Text } from "@tarojs/components";
+import Taro from "@tarojs/taro";
+import { useUpload } from "@/hooks/useUpload";
+
+import "./index.scss";
+
+interface Props {
+  value?: string[];
+  onChange?: (urls: string[]) => void;
+  maxCount?: number;
+  collection?: string;
+  recordId?: string;
+  field?: string;
+}
+
+export default function ImageUpload({
+  value = [],
+  onChange,
+  maxCount = 9,
+  collection = "",
+  recordId = "",
+  field = "images",
+}: Props) {
+  const [images, setImages] = useState<string[]>(value);
+  const { uploading, chooseAndUpload } = useUpload();
+
+  const handleChoose = async () => {
+    if (images.length >= maxCount) {
+      Taro.showToast({
+        title: `最多上传${maxCount}张`,
+        icon: "none",
+      });
+      return;
+    }
+
+    try {
+      const remaining = maxCount - images.length;
+      const results = await chooseAndUpload(
+        collection,
+        recordId,
+        field,
+        remaining,
+      );
+
+      const newImages = [...images, ...results.map((r: any) => r[field])];
+      setImages(newImages);
+      onChange?.(newImages);
+
+      Taro.showToast({ title: "上传成功", icon: "success" });
+    } catch (err) {
+      Taro.showToast({ title: "上传失败", icon: "none" });
+    }
+  };
+
+  const handlePreview = (index: number) => {
+    Taro.previewImage({
+      current: images[index],
+      urls: images,
+    });
+  };
+
+  const handleRemove = (index: number) => {
+    const newImages = images.filter((_, i) => i !== index);
+    setImages(newImages);
+    onChange?.(newImages);
+  };
+
+  return (
+    <View className="image-upload">
+      <View className="image-list">
+        {images.map((url, index) => (
+          <View
+            key={index}
+            className="image-item"
+            onClick={() => handlePreview(index)}
+          >
+            <Image src={url} mode="aspectFill" className="image" />
+            <View
+              className="remove-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleRemove(index);
+              }}
+            >
+              <Text className="remove-icon">×</Text>
+            </View>
+          </View>
+        ))}
+
+        {images.length < maxCount && (
+          <View className="upload-btn" onClick={handleChoose}>
+            <Text className="upload-icon">+</Text>
+            <Text className="upload-text">
+              {uploading ? "上传中..." : "上传图片"}
+            </Text>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+}
+```
+
+## 平台特定处理
+
+### 条件编译
+
+Taro 支持条件编译，可以为不同平台编写特定代码：
+
+```typescript
+// src/utils/platform.ts
+
+export const isWeapp = process.env.TARO_ENV === "weapp";
+export const isH5 = process.env.TARO_ENV === "h5";
+export const isRN = process.env.TARO_ENV === "rn";
+export const isAlipay = process.env.TARO_ENV === "alipay";
+
+// 获取平台特定的存储
+export function getPlatformStorage() {
+  if (isWeapp || isAlipay) {
+    return {
+      get: (key: string) => {
+        // @ts-ignore
+        const { Taro } = require("@tarojs/taro");
+        return Taro.getStorageSync(key);
+      },
+      set: (key: string, value: any) => {
+        // @ts-ignore
+        const { Taro } = require("@tarojs/taro");
+        Taro.setStorageSync(key, value);
+      },
+      remove: (key: string) => {
+        // @ts-ignore
+        const { Taro } = require("@tarojs/taro");
+        Taro.removeStorageSync(key);
+      },
+    };
+  }
+
+  // H5 和 RN 使用 localStorage
+  return {
+    get: (key: string) => {
+      const value = localStorage.getItem(key);
+      return value ? JSON.parse(value) : null;
+    },
+    set: (key: string, value: any) => {
+      localStorage.setItem(key, JSON.stringify(value));
+    },
+    remove: (key: string) => {
+      localStorage.removeItem(key);
+    },
+  };
+}
+
+// 获取平台特定的网络请求
+export function getPlatformRequest() {
+  if (isWeapp || isAlipay) {
+    return (config: any) => {
+      // @ts-ignore
+      const { Taro } = require("@tarojs/taro");
+      return Taro.request(config);
+    };
+  }
+
+  // H5 和 RN 使用 fetch
+  return (config: any) => {
+    return fetch(config.url, {
+      method: config.method,
+      headers: config.header,
+      body: config.data,
+    }).then((res) => res.json());
+  };
+}
+```
+
+### 微信小程序特定配置
+
+```typescript
+// src/utils/wechat.ts
+import Taro from "@tarojs/taro";
+
+// 微信登录
+export async function wechatLogin() {
+  // 获取 code
+  const { code } = await Taro.login();
+
+  // 获取用户信息（需要授权）
+  const { userInfo } = await Taro.getUserInfo({
+    withCredentials: true,
+  });
+
+  // 发送到后端
+  const response = await fetch("/api/wechat-login", {
+    method: "POST",
+    body: JSON.stringify({
+      code,
+      userInfo,
+    }),
+  });
+
+  return response.json();
+}
+
+// 微信支付
+export async function wechatPay(orderId: string) {
+  // 获取支付参数
+  const params = await fetch(`/api/wechat-pay-params/${orderId}`).then((r) =>
+    r.json(),
+  );
+
+  // 调起支付
+  const result = await Taro.requestPayment({
+    timeStamp: params.timeStamp,
+    nonceStr: params.nonceStr,
+    package: params.package,
+    signType: "MD5",
+    paySign: params.paySign,
+  });
+
+  return result;
+}
+
+// 分享
+export function shareAppMessage(title: string, path: string) {
+  return {
+    title,
+    path,
+    imageUrl: "", // 分享图片
+  };
+}
+```
+
+## 常见问题
+
+### Q: 小程序 WebSocket 不支持怎么办？
+
+使用轮询替代实时订阅：
+
+```typescript
+export function usePollingCollection(
+  collection: string,
+  filter: string,
+  interval = 5000,
+) {
+  const [items, setItems] = useState([]);
+  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+
+  useEffect(() => {
+    // 仅在小程序环境启用轮询
+    if (process.env.TARO_ENV !== "weapp") return;
+
+    const timer = setInterval(async () => {
+      const result = await pb.collection(collection).getList(1, 10, {
+        filter,
+        sort: "-created",
+      });
+
+      // 检查是否有更新
+      if (result.items.length > 0) {
+        const newest = result.items[0];
+        const newestDate = new Date(newest.created);
+
+        if (newestDate > lastUpdate) {
+          setItems(result.items);
+          setLastUpdate(newestDate);
+        }
+      }
+    }, interval);
+
+    return () => clearInterval(timer);
+  }, [collection, filter, interval, lastUpdate]);
+
+  return items;
+}
+```
+
+### Q: 如何处理跨域问题？
+
+开发时配置代理：
+
+```javascript
+// config/proxy.ts
+export default {
+  "/api/(.*)": {
+    target: "http://192.168.1.100:8090",
+    changeOrigin: true,
+    pathRewrite: {
+      "^/api": "/api",
+    },
+  },
+};
+```
+
+### Q: H5 和小程序样式不一致？
+
+使用 Taro 的样式适配方案：
+
+```scss
+// 使用 px 自动转换
+.container {
+  width: 750px; // 会自动转换对应设备的 rpx/px
+  padding: 24px;
+}
+
+// 使用 Taro 的样式变量
+@import "~@tarojs/taro/html.css";
+```
+
+## 最佳实践
+
+1. **统一 API 封装**：将 PocketBase 操作封装成 Hooks
+2. **条件编译**：针对不同平台编写特定代码
+3. **类型安全**：使用 TypeScript 定义数据模型
+4. **错误处理**：统一处理网络错误和业务错误
+5. **状态管理**：结合 Zustand/Redux 管理全局状态
+6. **图片优化**：使用缩略图减少加载时间

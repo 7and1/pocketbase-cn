@@ -3,20 +3,21 @@ import { SITE_URL } from "../lib/constants/config";
 import { POSTS_PER_PAGE } from "../lib/constants/blog";
 
 export async function GET() {
-  const blog = await getCollection("blog", ({ data }) => !data.draft);
+  const blog = await getCollection("blog", ({ data }: { data: { draft?: boolean } }) => !data.draft);
 
   const sitemap = `
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${(() => {
   const posts = blog.sort(
-    (a, b) => +new Date(b.data.publishDate) - +new Date(a.data.publishDate),
+    (a: { data: { publishDate: Date } }, b: { data: { publishDate: Date } }) =>
+      +new Date(b.data.publishDate) - +new Date(a.data.publishDate),
   );
 
   const categories = [
-    ...new Set(posts.map((p) => String(p.data.category || "未分类"))),
+    ...new Set(posts.map((p: { data: { category?: string } }) => String(p.data.category || "未分类"))),
   ];
-  const tags = [...new Set(posts.flatMap((p) => p.data.tags))].filter(Boolean);
+  const tags = [...new Set(posts.flatMap((p: { data: { tags?: string[] } }) => p.data.tags || []))].filter(Boolean);
 
   const out: string[] = [];
   const seen = new Set<string>();
@@ -37,7 +38,7 @@ ${(() => {
   </url>`);
   };
 
-  const mostRecent = (items: typeof posts) => {
+  const mostRecent = (items: Array<{ data?: { updatedDate?: Date; publishDate?: Date } }>) => {
     const top = items[0];
     const date = top?.data?.updatedDate || top?.data?.publishDate;
     return (date || new Date()).toISOString();
@@ -62,10 +63,10 @@ ${(() => {
   // Category pages + pagination
   for (const category of categories) {
     const catPosts = posts.filter(
-      (p) => String(p.data.category || "未分类") === category,
+      (p: { data: { category?: string } }) => String(p.data.category || "未分类") === category,
     );
     const catPages = Math.ceil(catPosts.length / POSTS_PER_PAGE) || 1;
-    const enc = encodeURIComponent(category);
+    const enc = encodeURIComponent(String(category));
     pushUrl(
       `${SITE_URL}/blog/category/${enc}/`,
       mostRecent(catPosts),
@@ -85,10 +86,10 @@ ${(() => {
   // Tag pages + pagination
   for (const tag of tags) {
     const tagPosts = posts.filter(
-      (p) => Array.isArray(p.data.tags) && p.data.tags.includes(tag),
+      (p: { data: { tags?: string[] } }) => Array.isArray(p.data.tags) && p.data.tags.includes(String(tag)),
     );
     const tagPages = Math.ceil(tagPosts.length / POSTS_PER_PAGE) || 1;
-    const enc = encodeURIComponent(tag);
+    const enc = encodeURIComponent(String(tag));
     pushUrl(
       `${SITE_URL}/blog/tag/${enc}/`,
       mostRecent(tagPosts),

@@ -17,5 +17,9 @@
     "web:build": "pnpm -C apps/web build",
     "web:smoke": "pnpm -C apps/web smoke:dist",
     "web:preview": "pnpm -C apps/web preview"
+  },
+  "dependencies": {
+    "@astrojs/rss": "4.0.14",
+    "@vercel/og": "0.8.6"
   }
 }

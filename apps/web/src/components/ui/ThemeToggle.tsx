@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "../../lib/utils/cn";
 
-type Theme = "light" | "dark" | "system";
+export type Theme = "light" | "dark" | "system";
 
 function getSystemTheme(): "light" | "dark" {
   if (typeof window === "undefined") return "light";
