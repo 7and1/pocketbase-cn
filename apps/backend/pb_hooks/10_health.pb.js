@@ -31,37 +31,6 @@ routerAdd("GET", "/api/ready", function (c) {
   }
 });
 
-// CSRF token endpoint for authenticated and anonymous users
-routerAdd("GET", "/api/csrf-token", function (c) {
-  try {
-    var sec = require(__hooks + "/lib/security.js");
-    var sessionId = "";
-    try {
-      sessionId = sec.getSessionId(c);
-    } catch (_) {
-      sessionId = "unknown";
-    }
-
-    var token = sec.generateCsrfToken(sessionId);
-    var nonce = "";
-    try {
-      nonce = sec.generateNonce();
-    } catch (_) {
-      nonce = "";
-    }
-
-    return c.json(200, {
-      token: token,
-      nonce: nonce,
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    });
-  } catch (err) {
-    return c.json(500, {
-      error: "Failed to generate security token",
-    });
-  }
-});
-
 // Backup status endpoint - checks Litestream replication health
 // Requires Litestream to be configured with S3/R2 backend
 routerAdd("GET", "/api/health/backup", function (c) {
