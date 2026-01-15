@@ -1,3 +1,5 @@
+export const prerender = false;
+
 import { SITE_URL, POCKETBASE_URL } from "../lib/constants/config";
 
 interface PluginItem {

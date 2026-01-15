@@ -1,7 +1,7 @@
+export const prerender = false;
+
 import { getCollection } from "astro:content";
 import { SITE_URL } from "../lib/constants/config";
-import fs from "fs";
-import path from "path";
 
 function routeForId(id: string) {
   const normalized = String(id || "").replace(/^\/+|\/+$/g, "");
@@ -12,31 +12,27 @@ function routeForId(id: string) {
   return `/${normalized}/`;
 }
 
-function getFileModTime(docId: string): string {
-  try {
-    const filePath = path.join(
-      process.cwd(),
-      "src",
-      "content",
-      "docs",
-      `${docId}.mdx`,
-    );
-    const stats = fs.statSync(filePath);
-    return stats.mtime.toISOString();
-  } catch {
-    return new Date().toISOString();
-  }
+function toIsoDate(value: unknown): string | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(date.valueOf()) ? null : date.toISOString();
 }
 
 export async function GET() {
   const docs = await getCollection("docs");
+  const now = new Date().toISOString();
 
   const sitemap = `
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${docs
-  .map((doc: { id: string }) => {
-    const lastmod = getFileModTime(doc.id);
+  .map((doc: { id: string; data?: Record<string, unknown> }) => {
+    const data = doc.data || {};
+    const lastmod =
+      toIsoDate(data.updatedDate) ||
+      toIsoDate(data.lastUpdated) ||
+      toIsoDate(data.date) ||
+      now;
     return `  <url>
     <loc>${SITE_URL}${routeForId(doc.id)}</loc>
     <lastmod>${lastmod}</lastmod>

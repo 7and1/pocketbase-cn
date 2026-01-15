@@ -1,3 +1,5 @@
+export const prerender = false;
+
 import { SITE_URL } from "../lib/constants/config";
 
 export async function GET() {

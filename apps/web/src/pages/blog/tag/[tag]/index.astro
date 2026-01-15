@@ -1,4 +1,6 @@
 ---
+export const prerender = false;
+
 import BaseLayout from "../../../../layouts/BaseLayout.astro";
 import BlogArchive from "../../../../components/blog/BlogArchive.astro";
 import { getCollection } from "astro:content";
@@ -60,4 +62,3 @@ const canonical = new URL(`/blog/tag/${encodeURIComponent(selectedTag)}/`, SITE_
     urlForPage={urlForPage}
   />
 </BaseLayout>
-

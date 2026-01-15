@@ -1,3 +1,5 @@
+export const prerender = false;
+
 import { getCollection } from "astro:content";
 import { SITE_URL } from "../lib/constants/config";
 import { POSTS_PER_PAGE } from "../lib/constants/blog";

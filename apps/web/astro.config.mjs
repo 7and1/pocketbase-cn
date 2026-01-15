@@ -11,6 +11,7 @@ import { env } from "./env.mjs";
 const SITE_URL = env.PUBLIC_SITE_URL;
 
 export default defineConfig({
+  output: "server",
   site: SITE_URL,
   adapter: cloudflare({
     platformProxy: { enabled: false }, // Disable to avoid build error
