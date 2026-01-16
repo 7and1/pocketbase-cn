@@ -65,6 +65,9 @@ jobs:
           name: dist
           path: apps/web/dist
 
+      - name: Install wrangler globally
+        run: npm install -g wrangler
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
