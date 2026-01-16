@@ -51,10 +51,10 @@ export default function LoginPanel() {
             setError(null);
             setLoading(true);
             try {
-              await pb.collection("users").authWithOAuth2({
+              const authData = await pb.collection("users").authWithOAuth2({
                 provider: "github",
-                redirectUrl: `${window.location.origin}/auth/callback`,
               });
+              // Success! Reload the page to update auth state
               window.location.href = "/";
             } catch (e: unknown) {
               const message =
@@ -115,7 +115,7 @@ export default function LoginPanel() {
       {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
       <p className="mt-4 text-xs text-neutral-600 dark:text-neutral-400">
         {mode === "github"
-          ? "需要在 PocketBase 后端配置 GitHub OAuth Provider，并设置允许的回调地址。"
+          ? "登录时将打开 GitHub 弹窗，请在 PocketBase 管理后台配置 GitHub OAuth 应用。"
           : "邮箱/密码登录适用于自建账号（本地开发默认开启，可用 PUBLIC_ENABLE_PASSWORD_LOGIN=1 强制开启）。"}
       </p>
     </div>

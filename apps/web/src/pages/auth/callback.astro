@@ -10,8 +10,26 @@ import BaseLayout from "../../layouts/BaseLayout.astro";
     如果窗口没有自动关闭，请返回原页面重试。
   </p>
   <script>
-    // PocketBase OAuth popup flow typically redirects back here.
-    // Best-effort close; the main window continues the flow.
-    try { window.close(); } catch (_) {}
+    // PocketBase OAuth popup flow: this page handles the GitHub OAuth redirect
+    // and forwards the result via postMessage to the opener window.
+    (function() {
+      function postMessageToOpener() {
+        try {
+          if (window.opener) {
+            // Send the full URL to the opener so PocketBase SDK can parse the token
+            window.opener.postMessage({
+              type: 'pocketbase_oauth_callback',
+              url: window.location.href
+            }, window.location.origin);
+          }
+        } catch (_) {}
+      }
+
+      // Try to close the popup (will work if opened as popup)
+      try { window.close(); } catch (_) {}
+
+      // Fallback: post message and show close instruction
+      postMessageToOpener();
+    })();
   </script>
 </BaseLayout>
