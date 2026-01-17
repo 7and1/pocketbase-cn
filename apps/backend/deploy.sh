@@ -1,6 +1,24 @@
 #!/bin/bash
 # PocketBase.cn Deployment Script
+#
+# Production Server: 107.174.42.198
+# Project Path: /opt/docker-projects/heavy-tasks/vibing-code/PocketBase.cn
+#
 # Usage: ./deploy.sh
+#
+# Environment Setup (First Time):
+#   1. Copy deploy/production.env.example to deploy/.env
+#   2. Fill in required variables (PB_CSRF_SECRET, PUBLIC_SITE_URL)
+#   3. Generate CSRF secret: openssl rand -base64 32
+#
+# Admin Credentials Setup:
+#   PB_ADMIN_EMAIL="admin@pocketbase.cn" \
+#   PB_ADMIN_PASSWORD="your_secure_password" \
+#   node scripts/reset-admin.js
+#
+# Then access admin UI at: https://admin.pocketbase.cn/_/
+#
+# See ../CLAUDE.md for full documentation.
 
 set -euo pipefail
 
